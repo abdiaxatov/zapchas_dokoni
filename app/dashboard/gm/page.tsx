@@ -795,11 +795,11 @@ export default function GMPage() {
     const filtered = data.filter((row) => {
       const matchesSearch =
         searchTerm === "" ||
-        row.nomi.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        row.kodi.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        row.kompaniya.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        row.model.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        row.tovar.toLowerCase().includes(searchTerm.toLowerCase()) || // Search by tovar
+        row.nomi?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        String(row.kodi).toLowerCase().includes(searchTerm.toLowerCase()) ||
+        row.kompaniya?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        row.model?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        row.tovar?.toLowerCase().includes(searchTerm.toLowerCase()) || // Search by tovar
         (row.category || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
         (row.supplier || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
         (row.location || "").toLowerCase().includes(searchTerm.toLowerCase()) ||

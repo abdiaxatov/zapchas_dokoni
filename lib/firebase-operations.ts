@@ -31,6 +31,16 @@ export interface Product {
   isStatic?: boolean // Flag to identify static data
 }
 
+const removeUndefinedFields = <T extends Record<string, any>>(obj: T): Partial<T> => {
+  const cleaned: any = {}
+  for (const key in obj) {
+    if (obj[key] !== undefined) {
+      cleaned[key] = obj[key]
+    }
+  }
+  return cleaned
+}
+
 const COLLECTION_NAME = "products"
 
 const loadStaticProducts = async (): Promise<Product[]> => {
@@ -118,18 +128,20 @@ export const getProducts = async (): Promise<Product[]> => {
 // Add new product
 export const addProduct = async (product: Omit<Product, "id" | "createdAt" | "updatedAt">): Promise<string> => {
   try {
-    const docRef = await addDoc(collection(db, COLLECTION_NAME), {
+    const cleanedProduct = removeUndefinedFields({
       ...product,
       sold: product.sold || 0,
       stock: product.stock || 0,
       minStock: product.minStock || 10,
       maxStock: product.maxStock || 1000,
       status: product.status || "active",
-      isDeleted: false, // Initialize isDeleted flag
-      isStatic: false, // Mark as non-static
+      isDeleted: false,
+      isStatic: false,
       createdAt: Timestamp.now(),
       updatedAt: Timestamp.now(),
     })
+
+    const docRef = await addDoc(collection(db, COLLECTION_NAME), cleanedProduct)
     return docRef.id
   } catch (error) {
     console.error("Error adding product:", error)
@@ -139,12 +151,10 @@ export const addProduct = async (product: Omit<Product, "id" | "createdAt" | "up
 
 export const updateProduct = async (id: string, updates: Partial<Product>): Promise<void> => {
   try {
-    // Check if this is a static product
     const products = await getProducts()
     const product = products.find((p) => p.id === id)
 
     if (product?.isStatic) {
-      // For static products, check if Firebase entry already exists
       const q = query(collection(db, COLLECTION_NAME))
       const querySnapshot = await getDocs(q)
       const existingFirebaseProduct = querySnapshot.docs.find(
@@ -152,31 +162,31 @@ export const updateProduct = async (id: string, updates: Partial<Product>): Prom
       )
 
       if (existingFirebaseProduct) {
-        // Update existing Firebase entry
         const docRef = doc(db, COLLECTION_NAME, existingFirebaseProduct.id)
-        await updateDoc(docRef, {
+        const cleanedUpdates = removeUndefinedFields({
           ...updates,
           updatedAt: Timestamp.now(),
         })
+        await updateDoc(docRef, cleanedUpdates)
       } else {
-        // Create new Firebase entry with updated data
-        await addDoc(collection(db, COLLECTION_NAME), {
+        const cleanedProduct = removeUndefinedFields({
           ...product,
           ...updates,
-          id: id, // Keep original static ID
+          id: id,
           isStatic: true,
           isDeleted: false,
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now(),
         })
+        await addDoc(collection(db, COLLECTION_NAME), cleanedProduct)
       }
     } else {
-      // Regular Firebase product
       const docRef = doc(db, COLLECTION_NAME, id)
-      await updateDoc(docRef, {
+      const cleanedUpdates = removeUndefinedFields({
         ...updates,
         updatedAt: Timestamp.now(),
       })
+      await updateDoc(docRef, cleanedUpdates)
     }
   } catch (error) {
     console.error("Error updating product:", error)
@@ -186,18 +196,15 @@ export const updateProduct = async (id: string, updates: Partial<Product>): Prom
 
 export const deleteProduct = async (id: string): Promise<void> => {
   try {
-    // Check if this is a static product
     const products = await getProducts()
     const product = products.find((p) => p.id === id)
 
     if (product?.isStatic) {
-      // Check if Firebase entry already exists
       const q = query(collection(db, COLLECTION_NAME))
       const querySnapshot = await getDocs(q)
       const existingFirebaseProduct = querySnapshot.docs.find((doc) => doc.data().id === id && doc.data().isStatic)
 
       if (existingFirebaseProduct) {
-        // Update existing Firebase entry to mark as deleted
         const docRef = doc(db, COLLECTION_NAME, existingFirebaseProduct.id)
         await updateDoc(docRef, {
           isDeleted: true,
@@ -205,9 +212,8 @@ export const deleteProduct = async (id: string): Promise<void> => {
           updatedAt: Timestamp.now(),
         })
       } else {
-        // Create new Firebase entry marking it as deleted
         await addDoc(collection(db, COLLECTION_NAME), {
-          id: id, // Keep the original static ID
+          id: id,
           isDeleted: true,
           isStatic: true,
           deletedAt: Timestamp.now(),
@@ -216,7 +222,6 @@ export const deleteProduct = async (id: string): Promise<void> => {
         })
       }
     } else {
-      // For Firebase products, mark as deleted
       const docRef = doc(db, COLLECTION_NAME, id)
       await updateDoc(docRef, {
         isDeleted: true,
@@ -230,20 +235,17 @@ export const deleteProduct = async (id: string): Promise<void> => {
   }
 }
 
-// Sell product (increment sold count)
 export const sellProduct = async (id: string, quantity: number): Promise<void> => {
   try {
     const products = await getProducts()
     const product = products.find((p) => p.id === id)
     if (product) {
       if (product.isStatic) {
-        // Check if this static product already has a Firebase entry
         const q = query(collection(db, COLLECTION_NAME))
         const querySnapshot = await getDocs(q)
         const existingFirebaseProduct = querySnapshot.docs.find((doc) => doc.data().id === id && doc.data().isStatic)
 
         if (existingFirebaseProduct) {
-          // Update existing Firebase entry
           const docRef = doc(db, COLLECTION_NAME, existingFirebaseProduct.id)
           const data = existingFirebaseProduct.data()
           const newStock = Math.max(0, (data.stock || 0) - quantity)
@@ -254,10 +256,9 @@ export const sellProduct = async (id: string, quantity: number): Promise<void> =
             updatedAt: Timestamp.now(),
           })
         } else {
-          // Create new Firebase entry for static product
-          await addDoc(collection(db, COLLECTION_NAME), {
+          const cleanedProduct = removeUndefinedFields({
             ...product,
-            id: id, // Keep original static ID
+            id: id,
             sold: quantity,
             stock: Math.max(0, (product.stock || 0) - quantity),
             isStatic: true,
@@ -266,9 +267,9 @@ export const sellProduct = async (id: string, quantity: number): Promise<void> =
             createdAt: Timestamp.now(),
             updatedAt: Timestamp.now(),
           })
+          await addDoc(collection(db, COLLECTION_NAME), cleanedProduct)
         }
       } else {
-        // Regular Firebase product
         const docRef = doc(db, COLLECTION_NAME, id)
         const newStock = Math.max(0, (product.stock || 0) - quantity)
         await updateDoc(docRef, {
@@ -281,40 +282,6 @@ export const sellProduct = async (id: string, quantity: number): Promise<void> =
     }
   } catch (error) {
     console.error("Error selling product:", error)
-    throw error
-  }
-}
-
-export const deleteAllProducts = async (): Promise<void> => {
-  try {
-    const q = query(collection(db, COLLECTION_NAME))
-    const querySnapshot = await getDocs(q)
-
-    // Mark all documents as deleted
-    const deletePromises = querySnapshot.docs.map((docSnapshot) => {
-      return updateDoc(docSnapshot.ref, {
-        isDeleted: true,
-        deletedAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-      })
-    })
-    await Promise.all(deletePromises)
-
-    // Also mark all static products as deleted
-    const staticProducts = await loadStaticProducts()
-    const staticDeletePromises = staticProducts.map((product) => {
-      return addDoc(collection(db, COLLECTION_NAME), {
-        id: product.id,
-        isDeleted: true,
-        isStatic: true,
-        deletedAt: Timestamp.now(),
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-      })
-    })
-    await Promise.all(staticDeletePromises)
-  } catch (error) {
-    console.error("Error deleting all products:", error)
     throw error
   }
 }
@@ -338,7 +305,7 @@ export const addStock = async (id: string, quantity: number): Promise<void> => {
             updatedAt: Timestamp.now(),
           })
         } else {
-          await addDoc(collection(db, COLLECTION_NAME), {
+          const cleanedProduct = removeUndefinedFields({
             ...product,
             id: id,
             stock: (product.stock || 0) + quantity,
@@ -348,6 +315,7 @@ export const addStock = async (id: string, quantity: number): Promise<void> => {
             createdAt: Timestamp.now(),
             updatedAt: Timestamp.now(),
           })
+          await addDoc(collection(db, COLLECTION_NAME), cleanedProduct)
         }
       } else {
         const docRef = doc(db, COLLECTION_NAME, id)
@@ -383,7 +351,7 @@ export const removeStock = async (id: string, quantity: number): Promise<void> =
             updatedAt: Timestamp.now(),
           })
         } else {
-          await addDoc(collection(db, COLLECTION_NAME), {
+          const cleanedProduct = removeUndefinedFields({
             ...product,
             id: id,
             stock: newStock,
@@ -392,6 +360,7 @@ export const removeStock = async (id: string, quantity: number): Promise<void> =
             createdAt: Timestamp.now(),
             updatedAt: Timestamp.now(),
           })
+          await addDoc(collection(db, COLLECTION_NAME), cleanedProduct)
         }
       } else {
         const docRef = doc(db, COLLECTION_NAME, id)
@@ -425,7 +394,7 @@ export const bulkUpdateStock = async (updates: { id: string; stock: number }[]):
             updatedAt: Timestamp.now(),
           })
         } else {
-          return addDoc(collection(db, COLLECTION_NAME), {
+          const cleanedProduct = removeUndefinedFields({
             ...product,
             id: id,
             stock,
@@ -434,6 +403,7 @@ export const bulkUpdateStock = async (updates: { id: string; stock: number }[]):
             createdAt: Timestamp.now(),
             updatedAt: Timestamp.now(),
           })
+          return addDoc(collection(db, COLLECTION_NAME), cleanedProduct)
         }
       } else {
         const docRef = doc(db, COLLECTION_NAME, id)
@@ -480,6 +450,40 @@ export const getInventoryValue = async (): Promise<number> => {
     }, 0)
   } catch (error) {
     console.error("Error calculating inventory value:", error)
+    throw error
+  }
+}
+
+export const deleteAllProducts = async (): Promise<void> => {
+  try {
+    const q = query(collection(db, COLLECTION_NAME))
+    const querySnapshot = await getDocs(q)
+
+    // Mark all documents as deleted
+    const deletePromises = querySnapshot.docs.map((docSnapshot) => {
+      return updateDoc(docSnapshot.ref, {
+        isDeleted: true,
+        deletedAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      })
+    })
+    await Promise.all(deletePromises)
+
+    // Also mark all static products as deleted
+    const staticProducts = await loadStaticProducts()
+    const staticDeletePromises = staticProducts.map((product) => {
+      return addDoc(collection(db, COLLECTION_NAME), {
+        id: product.id,
+        isDeleted: true,
+        isStatic: true,
+        deletedAt: Timestamp.now(),
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      })
+    })
+    await Promise.all(staticDeletePromises)
+  } catch (error) {
+    console.error("Error deleting all products:", error)
     throw error
   }
 }
