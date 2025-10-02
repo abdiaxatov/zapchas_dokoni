@@ -1539,7 +1539,7 @@ export default function DataPage() {
         <div>
           <h1 className="text-2xl lg:text-3xl font-bold text-gray-900 flex items-center gap-3">
             <Table className="h-8 w-8 text-[#0099b5]" />
-            {t("sidebar.table")}
+            GM
           </h1>
           <p className="text-sm text-gray-500 mt-1 flex items-center gap-2">
             <span className="font-medium text-gray-700">{t("data.manage")}</span>

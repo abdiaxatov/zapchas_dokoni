@@ -54,7 +54,7 @@ const translations = {
     // Sidebar
     "sidebar.dashboard": "Dashboard",
     "sidebar.users": "Foydalanuvchilar",
-    "sidebar.table": "Jadval",
+    "sidebar.table": "hyundai & kia",
     "sidebar.analytics": "Analitika",
     "sidebar.settings": "Sozlamalar",
     "sidebar.logout": "Chiqish",
@@ -411,7 +411,7 @@ const translations = {
     // Sidebar
     "sidebar.dashboard": "대시보드",
     "sidebar.users": "사용자",
-    "sidebar.table": "테이블",
+    "sidebar.table": "hyundai & kia",
     "sidebar.analytics": "분석",
     "sidebar.settings": "설정",
     "sidebar.logout": "로그아웃",
