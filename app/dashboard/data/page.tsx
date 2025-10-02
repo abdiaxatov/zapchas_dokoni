@@ -52,7 +52,13 @@ import {
   Settings,
   Hash,
   Tag,
-  MoreHorizontal,
+  Printer,
+  Receipt,
+  HandCoins,
+  Wallet,
+  CreditCard,
+  Users,
+  MapPin,
 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
@@ -68,9 +74,18 @@ import {
   getLowStockProducts,
   getInventoryValue,
   type Product,
+  getSaleTransactions,
+  saveSaleTransaction,
+  type SaleTransaction,
+  getLoans,
+  createLoan,
+  addLoanPayment,
+  getPendingLoans,
+  getTotalLoanAmount,
+  type LoanRecord,
 } from "@/lib/firebase-operations"
 import * as XLSX from "xlsx"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs" // Added for tabs
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   BarChart,
   Bar,
@@ -84,14 +99,10 @@ import {
   Cell,
   LineChart,
   Line,
-} from "recharts" // Added for charts
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu" // Added for dropdown menu
+} from "recharts"
+import { DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Timestamp } from "firebase/firestore"
 
 export default function DataPage() {
   const { user, loading } = useAuth()
@@ -139,7 +150,56 @@ export default function DataPage() {
 
   const [activeTab, setActiveTab] = useState("table")
 
+  const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set())
+  const [isBulkSellModalOpen, setIsBulkSellModalOpen] = useState(false)
+  const [bulkSellQuantities, setBulkSellQuantities] = useState<Record<string, number>>({})
+  const [showReceipt, setShowReceipt] = useState(false)
+  const [receiptData, setReceiptData] = useState<any>(null)
+  const [saleTransactions, setSaleTransactions] = useState<SaleTransaction[]>([])
+  const [salesHistoryFilter, setSalesHistoryFilter] = useState<"all" | "today" | "week" | "month">("all")
+
+  const [loans, setLoans] = useState<LoanRecord[]>([])
+  const [pendingLoans, setPendingLoans] = useState<LoanRecord[]>([])
+  const [totalLoanAmount, setTotalLoanAmount] = useState(0)
+  const [isLoanModalOpen, setIsLoanModalOpen] = useState(false)
+  const [isLoanPaymentModalOpen, setIsLoanPaymentModalOpen] = useState(false)
+  const [isLoanDetailsModalOpen, setIsLoanDetailsModalOpen] = useState(false)
+  const [selectedLoan, setSelectedLoan] = useState<LoanRecord | null>(null)
+  const [loanStatusFilter, setLoanStatusFilter] = useState<string>("all")
+  const [loanSearchQuery, setLoanSearchQuery] = useState("")
+  const [salesSearchQuery, setSalesSearchQuery] = useState("")
+  const [isSaleDetailsModalOpen, setIsSaleDetailsModalOpen] = useState(false)
+  const [selectedSale, setSelectedSale] = useState<SaleTransaction | null>(null)
+  const [sellAsLoan, setSellAsLoan] = useState(false)
+  const [loanCustomerData, setLoanCustomerData] = useState({
+    customerName: "",
+    customerPhone: "",
+    customerAddress: "",
+    dueDate: "",
+    notes: "",
+  })
+  const [loanPaymentData, setLoanPaymentData] = useState({
+    amount: "",
+    note: "",
+  })
+
+  const [isInitialLoading, setIsInitialLoading] = useState(true)
+  const [showImportDialog, setShowImportDialog] = useState(false)
+  const [importFile, setImportFile] = useState<File | null>(null)
+  const [refreshing, setRefreshing] = useState(false) // Added refreshing state
+
+  // Pagination state for loans and sales tabs
+  const [loansPage, setLoansPage] = useState(1)
+  const [loansPerPage, setLoansPerPage] = useState(10)
+  const [salesPage, setSalesPage] = useState(1)
+  const [salesPerPage, setSalesPerPage] = useState(10)
+
+  const [companies, setCompanies] = useState<string[]>([]) // Declared companies state
+  const [categories, setCategories] = useState<string[]>([]) // Declared categories state
+  const [salesTrendData, setSalesTrendData] = useState<Array<{ month: string; sales: number }>>([]) // Declared salesTrendData state
+  const [categoryData, setCategoryData] = useState<Array<{ name: string; value: number }>>([]) // Declared categoryData state
   const [formData, setFormData] = useState({
+    // Declared formData state
     kodi: "",
     model: "",
     nomi: "",
@@ -156,23 +216,10 @@ export default function DataPage() {
     weight: "",
     dimensions: "",
     description: "",
-    status: "active" as "active" | "inactive" | "discontinued",
+    status: "active",
   })
-
-  // Added state for modal visibility and filter options
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false)
-  const [companies, setCompanies] = useState<string[]>([])
-  const [categories, setCategories] = useState<string[]>([])
-  const [salesTrendData, setSalesTrendData] = useState<Array<{ month: string; sales: number }>>([])
-  const [categoryData, setCategoryData] = useState<Array<{ name: string; value: number }>>([])
-
-  // Added refresh state and ref for file input
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const [refreshing, setRefreshing] = useState(false) // Added refreshing state
-
-  const [isInitialLoading, setIsInitialLoading] = useState(true)
-  const [showImportDialog, setShowImportDialog] = useState(false)
-  const [importFile, setImportFile] = useState<File | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null) // Declared fileInputRef
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false) // Declared isAddModalOpen state
 
   useEffect(() => {
     if (!loading && !user) {
@@ -180,23 +227,59 @@ export default function DataPage() {
     }
   }, [user, loading, router])
 
-  useEffect(() => {
+  const loadData = async () => {
     if (user) {
-      const loadAllData = async () => {
-        setIsInitialLoading(true)
-        await Promise.all([
-          loadProducts(),
-          loadLowStockProducts(),
-          loadInventoryValue(),
-          loadCompanyData(),
-          loadCategoryData(),
-          loadSalesTrend(),
-        ])
-        setIsInitialLoading(false)
-      }
-      loadAllData()
+      setIsInitialLoading(true)
+      await Promise.all([
+        loadProducts(),
+        loadLowStockProducts(),
+        loadInventoryValue(),
+        loadCompanyData(),
+        loadCategoryData(),
+        loadSalesTrend(),
+        loadLoans(),
+        loadPendingLoans(),
+        loadTotalLoanAmount(),
+      ])
+      setIsInitialLoading(false)
     }
-  }, [user])
+  }
+
+  // Fetch initial data including sale transactions
+  useEffect(() => {
+    const fetchData = async () => {
+      if (user) {
+        setIsInitialLoading(true)
+        try {
+          const [productsData, loansData, transactionsData] = await Promise.all([
+            getProducts(),
+            getLoans(),
+            getSaleTransactions(),
+          ])
+          setData(productsData)
+          setLoans(loansData)
+          setSaleTransactions(transactionsData)
+          loadLowStockProducts()
+          loadInventoryValue()
+          loadCompanyData()
+          loadCategoryData()
+          loadSalesTrend()
+          loadPendingLoans()
+          loadTotalLoanAmount()
+        } catch (error) {
+          console.error("Error fetching data:", error)
+          showToast({
+            title: t("common.error"),
+            description: t("common.errorFetchingData"),
+            variant: "destructive",
+          })
+        } finally {
+          setIsInitialLoading(false)
+        }
+      }
+    }
+    fetchData()
+  }, [user, t, showToast])
 
   const loadProducts = async () => {
     try {
@@ -247,7 +330,17 @@ export default function DataPage() {
   // Added function to calculate sales trend data
   const loadSalesTrend = () => {
     const monthlySales: { [key: string]: number } = {}
+    // Ensure data is available before iterating
+    if (data.length === 0) {
+      setSalesTrendData([])
+      return
+    }
+
     data.forEach((product) => {
+      // Assuming product.sold represents sales for that product.
+      // If sales trend should be based on sale transactions, this needs to be re-evaluated.
+      // For now, assuming it's based on total sold quantity per product category or similar.
+      // This calculation might need to be based on actual sale transactions for a more accurate trend.
       const month = new Date().toLocaleString("default", { month: "short" }) // Simplified for example
       monthlySales[month] = (monthlySales[month] || 0) + (product.sold || 0)
     })
@@ -269,6 +362,191 @@ export default function DataPage() {
   useEffect(() => {
     calculateCategoryData()
   }, [data])
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      const allIds = new Set(paginatedData.map((p) => p.id).filter(Boolean) as string[])
+      setSelectedProducts(allIds)
+      // Initialize quantities for all selected products
+      const quantities: Record<string, number> = {}
+      paginatedData.forEach((p) => {
+        if (p.id) quantities[p.id] = 1
+      })
+      setBulkSellQuantities(quantities)
+    } else {
+      setSelectedProducts(new Set())
+      setBulkSellQuantities({})
+    }
+  }
+
+  const handleSelectProduct = (productId: string, checked: boolean) => {
+    const newSelected = new Set(selectedProducts)
+    if (checked) {
+      newSelected.add(productId)
+      setBulkSellQuantities((prev) => ({ ...prev, [productId]: 1 }))
+    } else {
+      newSelected.delete(productId)
+      setBulkSellQuantities((prev) => {
+        const updated = { ...prev }
+        delete updated[productId]
+        return updated
+      })
+    }
+    setSelectedProducts(newSelected)
+  }
+
+  const handleBulkSell = async () => {
+    try {
+      const selectedProductsList = Array.from(selectedProducts)
+        .map((id) => data.find((p) => p.id === id))
+        .filter((p): p is Product => p !== undefined)
+
+      if (selectedProductsList.length === 0) {
+        showToast({
+          title: t("common.error"),
+          description: "Iltimos, sotish uchun mahsulotlarni tanlang",
+          variant: "destructive",
+        })
+        return
+      }
+
+      // Validate quantities
+      for (const product of selectedProductsList) {
+        const quantity = bulkSellQuantities[product.id!] || 0
+        if (quantity <= 0) {
+          showToast({
+            title: t("common.error"),
+            description: `${product.nomi} uchun miqdor kiriting`,
+            variant: "destructive",
+          })
+          return
+        }
+        if (quantity > (product.stock || 0)) {
+          showToast({
+            title: t("common.error"),
+            description: `${product.nomi} uchun yetarli mahsulot yo'q`,
+            variant: "destructive",
+          })
+          return
+        }
+      }
+
+      // If selling as loan, validate customer data
+      if (sellAsLoan) {
+        if (!loanCustomerData.customerName.trim()) {
+          showToast({
+            title: t("common.error"),
+            description: t("loan.customerName") + " kiritilishi shart",
+            variant: "destructive",
+          })
+          return
+        }
+      }
+
+      // Process sales
+      const saleItems = []
+      for (const product of selectedProductsList) {
+        const quantity = bulkSellQuantities[product.id!]
+        await sellProduct(product.id!, quantity)
+
+        const price = Number.parseFloat(product.narxi.replace(/[^\d.]/g, "")) || 0
+        saleItems.push({
+          productId: product.id!,
+          productName: product.nomi,
+          productCode: product.kodi,
+          company: product.kompaniya,
+          quantity,
+          price,
+          total: price * quantity,
+          location: product.location, // Add location to sale item
+        })
+      }
+
+      // Create receipt data
+      const totalAmount = saleItems.reduce((sum, item) => sum + item.total, 0)
+      const receiptNumber = `RCP-${Date.now()}`
+
+      const receipt = {
+        receiptNumber,
+        items: saleItems,
+        totalAmount,
+        date: new Date(),
+      }
+
+      // Save transaction
+      const transactionData: Omit<SaleTransaction, "id" | "createdAt"> = {
+        items: saleItems,
+        totalAmount,
+        receiptNumber,
+        saleDate: Timestamp.now(),
+        isLoan: sellAsLoan,
+        loanStatus: sellAsLoan ? "pending" : undefined,
+        amountPaid: sellAsLoan ? 0 : totalAmount,
+        amountRemaining: sellAsLoan ? totalAmount : 0,
+      }
+
+      const transactionId = await saveSaleTransaction(transactionData)
+
+      // If loan, create loan record
+      if (sellAsLoan) {
+        await createLoan({
+          customerName: loanCustomerData.customerName,
+          customerPhone: loanCustomerData.customerPhone,
+          customerAddress: loanCustomerData.customerAddress,
+          transactionId,
+          receiptNumber,
+          totalAmount,
+          amountPaid: 0,
+          amountRemaining: totalAmount,
+          loanDate: Timestamp.now(),
+          dueDate: loanCustomerData.dueDate ? Timestamp.fromDate(new Date(loanCustomerData.dueDate)) : undefined,
+          status: "pending",
+          paymentHistory: [],
+          notes: loanCustomerData.notes,
+        })
+
+        showToast({
+          title: t("common.success"),
+          description: t("loan.loanCreated"),
+          variant: "success",
+        })
+      }
+
+      setReceiptData(receipt)
+      setShowReceipt(true)
+      setIsBulkSellModalOpen(false)
+      setSelectedProducts(new Set())
+      setBulkSellQuantities({})
+      setSellAsLoan(false)
+      setLoanCustomerData({
+        customerName: "",
+        customerPhone: "",
+        customerAddress: "",
+        dueDate: "",
+        notes: "",
+      })
+
+      await loadSaleTransactions()
+      await loadData()
+
+      showToast({
+        title: t("common.success"),
+        description: `${selectedProductsList.length} ta mahsulot sotildi`,
+        variant: "success",
+      })
+    } catch (error) {
+      console.error("Error selling products:", error)
+      showToast({
+        title: t("common.error"),
+        description: "Mahsulotlarni sotishda xatolik yuz berdi",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const printReceipt = () => {
+    window.print()
+  }
 
   const handleCreate = async () => {
     try {
@@ -788,7 +1066,7 @@ export default function DataPage() {
   const totalSales = data.reduce((sum, product) => sum + (product.sold || 0), 0)
 
   const totalRevenue = data.reduce((sum, product) => {
-    const price = Number.parseFloat(product.narxi?.toString().replace(/[^0-9.-]/g, "") || "0")
+    const price = Number.parseFloat(product.narxi?.toString().replace(/[^0-9.-]/g, "")) || 0
     const sold = product.sold || 0
     return sum + sold * price
   }, 0)
@@ -796,7 +1074,7 @@ export default function DataPage() {
   const averagePrice =
     data.length > 0
       ? data.reduce((sum, product) => {
-          const price = Number.parseFloat(product.narxi?.toString().replace(/[^0-9.-]/g, "") || "0")
+          const price = Number.parseFloat(product.narxi?.toString().replace(/[^0-9.-]/g, "")) || 0
           return sum + (isNaN(price) ? 0 : price)
         }, 0) / data.length
       : 0
@@ -811,7 +1089,7 @@ export default function DataPage() {
   const companyStats = data.reduce(
     (acc, product) => {
       const company = product.kompaniya || "Unknown"
-      const price = Number.parseFloat(product.narxi?.toString().replace(/[^0-9.-]/g, "") || "0")
+      const price = Number.parseFloat(product.narxi?.toString().replace(/[^0-9.-]/g, "")) || 0
       const sold = product.sold || 0
 
       if (!acc[company]) {
@@ -870,6 +1148,155 @@ export default function DataPage() {
     { name: t("stats.outOfStock"), value: stockAnalytics.outOfStock, color: "#ef4444" },
   ]
 
+  const loadLoans = async () => {
+    try {
+      const loansData = await getLoans()
+      setLoans(loansData)
+    } catch (error) {
+      console.error("Error loading loans:", error)
+    }
+  }
+
+  const loadPendingLoans = async () => {
+    try {
+      const pending = await getPendingLoans()
+      setPendingLoans(pending)
+    } catch (error) {
+      console.error("Error loading pending loans:", error)
+    }
+  }
+
+  const loadTotalLoanAmount = async () => {
+    try {
+      const total = await getTotalLoanAmount()
+      setTotalLoanAmount(total)
+    } catch (error) {
+      console.error("Error loading total loan amount:", error)
+    }
+  }
+
+  const loadSaleTransactions = async () => {
+    try {
+      const transactions = await getSaleTransactions()
+      setSaleTransactions(transactions)
+    } catch (error) {
+      console.error("Error loading sale transactions:", error)
+      showToast({
+        title: t("common.error"),
+        description: "Sotilgan mahsulotlar tarixini yuklashda xatolik", // Error loading sales history
+        variant: "destructive",
+      })
+    }
+  }
+
+  // Filter loans based on status and search query
+  const filteredLoans = useMemo(() => {
+    const searchLower = loanSearchQuery.toLowerCase()
+    return loans.filter((loan) => {
+      const matchesStatus =
+        loanStatusFilter === "all" ||
+        loan.status === loanStatusFilter ||
+        (loanStatusFilter === "partial" &&
+          loan.amountRemaining !== undefined &&
+          loan.amountRemaining > 0 &&
+          loan.amountRemaining < loan.totalAmount)
+      const matchesSearch =
+        !searchLower ||
+        loan.customerName.toLowerCase().includes(searchLower) ||
+        loan.customerPhone.toLowerCase().includes(searchLower) ||
+        (loan.notes || "").toLowerCase().includes(searchLower)
+
+      return matchesStatus && matchesSearch
+    })
+  }, [loans, loanStatusFilter, loanSearchQuery])
+
+  // Updated filteredSales to correctly include paid loans with their items
+  const filteredSales = useMemo(() => {
+    // Get regular sales (non-loan transactions)
+    const regularSales = saleTransactions.filter((transaction) => !transaction.isLoan)
+
+    // Get paid loans and map them with their transaction items
+    const paidLoans = loans
+      .filter((loan) => loan.status === "paid")
+      .map((loan) => {
+        // Find the corresponding transaction to get items
+        const transaction = saleTransactions.find((t) => t.id === loan.transactionId)
+
+        return {
+          id: loan.id,
+          receiptNumber: loan.receiptNumber,
+          items: transaction?.items || [],
+          totalAmount: loan.totalAmount,
+          saleDate: loan.loanDate || loan.saleDate || Timestamp.now(), // Use loanDate or fallback
+          isLoan: true,
+          isPaidLoan: true, // Mark as paid loan for display
+          customerName: loan.customerName,
+          customerPhone: loan.customerPhone,
+          customerAddress: loan.customerAddress,
+        }
+      })
+
+    // Combine regular sales and paid loans, then sort by date
+    const allSales = [...regularSales, ...paidLoans].sort((a, b) => {
+      const dateA = a.saleDate?.toDate?.() || new Date(0)
+      const dateB = b.saleDate?.toDate?.() || new Date(0)
+      return dateB.getTime() - dateA.getTime()
+    })
+
+    // Apply date filtering
+    const now = new Date()
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)
+    const monthAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000)
+
+    let dateFilteredSales = allSales
+    if (salesHistoryFilter === "today") {
+      dateFilteredSales = allSales.filter((transaction) => transaction.saleDate?.toDate?.() >= today)
+    } else if (salesHistoryFilter === "week") {
+      dateFilteredSales = allSales.filter((transaction) => transaction.saleDate?.toDate?.() >= weekAgo)
+    } else if (salesHistoryFilter === "month") {
+      dateFilteredSales = allSales.filter((transaction) => transaction.saleDate?.toDate?.() >= monthAgo)
+    }
+
+    // Apply search filter
+    if (!salesSearchQuery.trim()) return dateFilteredSales
+
+    const searchLower = salesSearchQuery.toLowerCase()
+    return dateFilteredSales.filter((transaction) => {
+      const receiptMatch = transaction.receiptNumber.toLowerCase().includes(searchLower)
+      const dateMatch = transaction.saleDate?.toDate?.()?.toLocaleDateString("uz-UZ").includes(searchLower)
+      const productMatch = transaction.items.some(
+        (item) =>
+          item.productName.toLowerCase().includes(searchLower) ||
+          item.productCode?.toLowerCase().includes(searchLower) ||
+          item.company?.toLowerCase().includes(searchLower),
+      )
+      const customerMatch =
+        (transaction.customerName?.toLowerCase().includes(searchLower) ||
+          transaction.customerPhone?.toLowerCase().includes(searchLower)) ??
+        false
+      return receiptMatch || dateMatch || productMatch || customerMatch
+    })
+  }, [saleTransactions, loans, salesHistoryFilter, salesSearchQuery])
+
+  const loansTotalPages = Math.ceil(filteredLoans.length / loansPerPage)
+  const loansStartIndex = (loansPage - 1) * loansPerPage
+  const loansEndIndex = loansStartIndex + loansPerPage
+  const paginatedLoans = filteredLoans.slice(loansStartIndex, loansEndIndex)
+
+  const salesTotalPages = Math.ceil(filteredSales.length / salesPerPage)
+  const salesStartIndex = (salesPage - 1) * salesPerPage
+  const salesEndIndex = salesStartIndex + salesPerPage
+  const paginatedSales = filteredSales.slice(salesStartIndex, salesEndIndex)
+
+  const totalSalesAmount = useMemo(() => {
+    return filteredSales.reduce((sum, t) => sum + t.totalAmount, 0)
+  }, [filteredSales])
+
+  const totalItemsSold = useMemo(() => {
+    return filteredSales.reduce((sum, t) => sum + t.items.reduce((itemSum, item) => itemSum + item.quantity, 0), 0)
+  }, [filteredSales])
+
   // Modified loading state handling
   if (loading || isInitialLoading) {
     return (
@@ -888,14 +1315,221 @@ export default function DataPage() {
 
   const handleRefresh = async () => {
     setRefreshing(true)
-    await loadProducts()
-    await loadLowStockProducts()
-    await loadInventoryValue()
-    await loadCompanyData()
-    await loadCategoryData()
-    await loadSalesTrend()
+    await loadData()
+    await loadSaleTransactions() // Also refresh sales history
     setRefreshing(false)
     showToast({ title: t("common.success"), description: t("data.refreshed"), variant: "success" })
+  }
+
+  const getFilteredSales = () => {
+    const now = new Date()
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)
+    const monthAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000)
+
+    return saleTransactions.filter((transaction) => {
+      if (transaction.isLoan) {
+        return false
+      }
+
+      const saleDate = transaction.saleDate.toDate()
+
+      switch (salesHistoryFilter) {
+        case "today":
+          return saleDate >= today
+        case "week":
+          return saleDate >= weekAgo
+        case "month":
+          return saleDate >= monthAgo
+        default: // "all"
+          return true
+      }
+    })
+  }
+
+  const handleAddLoanPayment = async () => {
+    if (!selectedLoan) return
+
+    try {
+      const amount = Number.parseFloat(loanPaymentData.amount)
+      if (isNaN(amount) || amount <= 0) {
+        showToast({
+          title: t("common.error"),
+          description: "To'g'ri summa kiriting",
+          variant: "destructive",
+        })
+        return
+      }
+
+      if (amount > (selectedLoan.amountRemaining || 0)) {
+        showToast({
+          title: t("common.error"),
+          description: "Summa qolgan qarzdan ko'p bo'lmasligi kerak",
+          variant: "destructive",
+        })
+        return
+      }
+
+      await addLoanPayment(selectedLoan.id!, amount, loanPaymentData.note)
+
+      showToast({
+        title: t("common.success"),
+        description: t("loan.paymentSuccess"),
+        variant: "success",
+      })
+
+      setIsLoanPaymentModalOpen(false)
+      setLoanPaymentData({ amount: "", note: "" })
+      setSelectedLoan(null)
+      await loadLoans()
+      await loadPendingLoans()
+      await loadTotalLoanAmount()
+    } catch (error) {
+      console.error("Error adding loan payment:", error)
+      showToast({
+        title: t("common.error"),
+        description: "To'lovni qo'shishda xatolik yuz berdi",
+        variant: "destructive",
+      })
+    }
+  }
+
+  // Render function for the loans table with product details
+  const renderLoansTable = () => {
+    return (
+      <div className="space-y-4">
+        {paginatedLoans.map((loan) => {
+          // Find the transaction to get product items
+          const transaction = saleTransactions.find((t) => t.id === loan.transactionId)
+          const items = transaction?.items || []
+
+          return (
+            <Card key={loan.id} className="border-l-4 border-l-primary">
+              <CardContent className="pt-6">
+                <div className="flex flex-col gap-4">
+                  {/* Customer Info */}
+                  <div className="flex items-start justify-between">
+                    <div className="space-y-2 flex-1">
+                      <div className="flex items-center gap-3">
+                        <Users className="h-5 w-5 text-muted-foreground" />
+                        <div>
+                          <p className="font-semibold text-lg">{loan.customerName}</p>
+                          {loan.customerPhone && <p className="text-sm text-muted-foreground">{loan.customerPhone}</p>}
+                        </div>
+                      </div>
+
+                      {/* Product Details */}
+                      {items.length > 0 && (
+                        <div className="mt-3 p-3 bg-gray-50 rounded-lg">
+                          <p className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
+                            <Package className="h-3 w-3" />
+                            Mahsulotlar:
+                          </p>
+                          <div className="space-y-1.5">
+                            {items.map((item, idx) => (
+                              <div key={idx} className="text-sm">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="flex-1">
+                                    <p className="font-medium text-gray-900">{item.productName}</p>
+                                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-600 mt-0.5">
+                                      <span>Kod: {item.productCode}</span>
+                                      <span>•</span>
+                                      <span>{item.company}</span>
+                                      {item.location && (
+                                        <>
+                                          <span>•</span>
+                                          <span className="flex items-center gap-0.5">
+                                            <MapPin className="h-3 w-3" />
+                                            {item.location}
+                                          </span>
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="text-right whitespace-nowrap">
+                                    <p className="text-xs text-gray-600">
+                                      {item.quantity} x ${item.price.toFixed(2)}
+                                    </p>
+                                    <p className="font-semibold text-sm">${(item.quantity * item.price).toFixed(2)}</p>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Financial Info */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+                        <div>
+                          <p className="text-xs text-muted-foreground">{t("loan.totalAmount")}</p>
+                          <p className="font-semibold">${loan.totalAmount.toLocaleString()}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">{t("loan.amountPaid")}</p>
+                          <p className="font-semibold text-green-600">${(loan.amountPaid || 0).toLocaleString()}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">{t("loan.amountRemaining")}</p>
+                          <p className="font-semibold text-orange-600">
+                            ${(loan.amountRemaining || 0).toLocaleString()}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">{t("loan.status")}</p>
+                          <Badge
+                            variant={
+                              loan.status === "paid"
+                                ? "default"
+                                : loan.status === "partial"
+                                  ? "secondary"
+                                  : "destructive"
+                            }
+                          >
+                            {t(`loan.status.${loan.status}`)}
+                          </Badge>
+                        </div>
+                      </div>
+
+                      {loan.notes && (
+                        <p className="text-sm text-muted-foreground mt-2">
+                          <span className="font-medium">Eslatma:</span> {loan.notes}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="flex gap-2 ml-4">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setSelectedLoan(loan)
+                          setIsLoanDetailsModalOpen(true)
+                        }}
+                      >
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                      {loan.status !== "paid" && (
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            setSelectedLoan(loan)
+                            setIsLoanPaymentModalOpen(true)
+                          }}
+                        >
+                          <CreditCard className="h-4 w-4 mr-2" />
+                          {t("loan.makePayment")}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )
+        })}
+      </div>
+    )
   }
 
   return (
@@ -1046,14 +1680,22 @@ export default function DataPage() {
       )}
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-2 mb-6 h-12 lg:h-10">
-          <TabsTrigger value="table" className="text-sm lg:text-base font-medium">
-            <Table className="h-4 w-4 mr-2" />
+        <TabsList className="grid w-full grid-cols-4 mb-6 h-12 lg:h-10">
+          <TabsTrigger value="table" className="flex items-center gap-2 text-sm lg:text-base font-medium">
+            <Table className="h-4 w-4" />
             {t("tabs.table")}
           </TabsTrigger>
-          <TabsTrigger value="statistics" className="text-sm lg:text-base font-medium">
-            <BarChart3 className="h-4 w-4 mr-2" />
+          <TabsTrigger value="statistics" className="flex items-center gap-2 text-sm lg:text-base font-medium">
+            <BarChart3 className="h-4 w-4" />
             {t("tabs.statistics")}
+          </TabsTrigger>
+          <TabsTrigger value="loans" className="flex items-center gap-2 text-sm lg:text-base font-medium">
+            <HandCoins className="h-4 w-4" />
+            {t("loan.title")}
+          </TabsTrigger>
+          <TabsTrigger value="history" className="flex items-center gap-2 text-sm lg:text-base font-medium">
+            <Receipt className="h-4 w-4" />
+            Tarix
           </TabsTrigger>
         </TabsList>
 
@@ -1101,6 +1743,15 @@ export default function DataPage() {
 
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                   <div className="flex flex-wrap gap-2">
+                    {selectedProducts.size > 0 && (
+                      <Button
+                        onClick={() => setIsBulkSellModalOpen(true)}
+                        className="bg-purple-600 hover:bg-purple-700 text-white h-9 lg:h-10 text-sm"
+                      >
+                        <ShoppingCart className="h-4 w-4 mr-2" />
+                        Mahsulotlarni sotish ({selectedProducts.size}) {/* Sell Products ({count}) */}
+                      </Button>
+                    )}
                     <Button
                       onClick={() => setIsAddModalOpen(true)}
                       className="bg-[#0099b5] hover:bg-[#0099b5]/90 text-white h-9 lg:h-10 text-sm"
@@ -1162,6 +1813,12 @@ export default function DataPage() {
                 <table className="w-full">
                   <thead className="bg-gray-50">
                     <tr>
+                      <th className="text-left py-4 px-6 font-semibold text-gray-700">
+                        <Checkbox
+                          checked={selectedProducts.size === paginatedData.length && paginatedData.length > 0}
+                          onCheckedChange={handleSelectAll}
+                        />
+                      </th>
                       <th
                         className="text-left py-4 px-6 font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors"
                         onClick={() => handleColumnClick("kodi")}
@@ -1219,6 +1876,22 @@ export default function DataPage() {
                           <Building2 className="h-4 w-4" />
                           {t("kompaniya")}
                           {sortColumn === "kompaniya" &&
+                            (sortDirection === "asc" ? (
+                              <ChevronUp className="h-4 w-4" />
+                            ) : (
+                              <ChevronDown className="h-4 w-4" />
+                            ))}
+                        </div>
+                      </th>
+                      <th
+                        className="text-left py-4 px-6 font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors"
+                        onClick={() => handleColumnClick("location")}
+                        title="Joylashuv"
+                      >
+                        <div className="flex items-center gap-2">
+                          <MapPin className="h-4 w-4" />
+                          Joylashuv
+                          {sortColumn === "location" &&
                             (sortDirection === "asc" ? (
                               <ChevronUp className="h-4 w-4" />
                             ) : (
@@ -1287,28 +1960,33 @@ export default function DataPage() {
                       <tr
                         key={row.id}
                         className={cn(
-                          "hover:bg-gray-50 transition-colors cursor-pointer",
+                          "hover:bg-gray-50 transition-colors",
                           index % 2 === 0 ? "bg-white" : "bg-gray-50/30",
                         )}
-                        onClick={() => handleViewDetails(row)}
                       >
-                        <td className="py-4 px-6">
+                        <td className="py-4 px-6" onClick={(e) => e.stopPropagation()}>
+                          <Checkbox
+                            checked={selectedProducts.has(row.id || "")}
+                            onCheckedChange={(checked) => handleSelectProduct(row.id || "", checked as boolean)}
+                          />
+                        </td>
+                        <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
                           <div className="flex items-center gap-2">
                             <div className="w-2 h-2 bg-[#0099b5] rounded-full"></div>
                             <span className="font-mono text-sm font-medium text-gray-900">{row.kodi}</span>
                           </div>
                         </td>
-                        <td className="py-4 px-6">
+                        <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
                           <span className="text-gray-600 font-medium">{row.model || "-"}</span>
                         </td>
-                        <td className="py-4 px-6">
+                        <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
                           <div className="max-w-[200px]">
                             <p className="text-gray-900 font-medium truncate" title={row.nomi}>
                               {row.nomi || "-"}
                             </p>
                           </div>
                         </td>
-                        <td className="py-4 px-6">
+                        <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
                           <Badge
                             className="bg-[#0099b5]/10 text-[#0099b5] border border-[#0099b5]/20 cursor-pointer hover:bg-[#0099b5]/20 transition-colors"
                             onClick={(e) => {
@@ -1320,10 +1998,16 @@ export default function DataPage() {
                             {row.kompaniya || "-"}
                           </Badge>
                         </td>
-                        <td className="py-4 px-6">
+                        <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
+                          <div className="flex items-center gap-1 text-sm text-gray-600">
+                            <MapPin className="h-3 w-3" />
+                            {row.location || "-"}
+                          </div>
+                        </td>
+                        <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
                           <span className="font-semibold text-green-600 text-lg">{row.narxi}</span>
                         </td>
-                        <td className="py-4 px-6">
+                        <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
                           <Badge
                             className={cn(
                               "font-semibold",
@@ -1337,7 +2021,7 @@ export default function DataPage() {
                             {row.stock || 0}
                           </Badge>
                         </td>
-                        <td className="py-4 px-6">
+                        <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
                           <Badge className="bg-blue-100 text-blue-800 border border-blue-200 font-semibold">
                             {row.sold || 0}
                           </Badge>
@@ -1363,30 +2047,30 @@ export default function DataPage() {
                               <Edit className="h-4 w-4" />
                             </Button>
 
-                                <Button  className="text-[#0099b5] hover:bg-[#0099b5]/10 p-2 h-9 w-9 rounded-full" variant="ghost"
-                              size="sm" onClick={() => handleStockAction(row, "add")}>
-                                  <PackagePlus className="h-4 w-4 mr-2 text-green-600" />
-                                  {/* {t("action.addStock")} */}
-                                </Button>
-                                <Button  className="text-[#0099b5] hover:bg-[#0099b5]/10 p-2 h-9 w-9 rounded-full" variant="ghost"
-                              size="sm" onClick={() => handleStockAction(row, "remove")}>
-                                  <PackageMinus className="h-4 w-4 mr-2 text-orange-600" />
-                                  {/* {t("action.removeStock")} */}
-                                </Button>
-                                <Button  className="text-[#0099b5] hover:bg-[#0099b5]/10 p-2 h-9 w-9 rounded-full" variant="ghost"
-                              size="sm" onClick={() => handleSell(row)}>
-                                  <ShoppingCart className="h-4 w-4 mr-2 text-purple-600" />
-                                  {/* {t("sellProduct")} */}
-                                </Button>
-                                <DropdownMenuSeparator />
-                                <Button
-                              variant="ghost"
-                              size="sm" onClick={() => handleDeleteClick(row)}
+                            <Button
                               className="text-[#0099b5] hover:bg-[#0099b5]/10 p-2 h-9 w-9 rounded-full"
-                                >
-                                  <Trash2 className="h-4 w-4 mr-2" />
-                                  {/* {t("deleteProduct")} */}
-                                </Button>
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleStockAction(row, "add")}
+                            >
+                              <PackagePlus className="h-4 w-4 text-green-600" />
+                            </Button>
+                            <Button
+                              className="text-[#0099b5] hover:bg-[#0099b5]/10 p-2 h-9 w-9 rounded-full"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleStockAction(row, "remove")}
+                            >
+                              <PackageMinus className="h-4 w-4 text-orange-600" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDeleteClick(row)}
+                              className="text-red-600 hover:bg-red-50 p-2 h-9 w-9 rounded-full"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
                           </div>
                         </td>
                       </tr>
@@ -1478,33 +2162,43 @@ export default function DataPage() {
                               <Edit className="h-3 w-3" />
                             </Button>
                           </div>
-                           <Button  variant="ghost"
-                                                        size="sm"
-                                                        className="text-[#0099b5] hover:bg-[#0099b5]/10 p-2 h-9 w-9 rounded-full" onClick={() => handleStockAction(row, "add")}>
-                                                            <PackagePlus className="h-4 w-4 mr-2 text-green-600" />
-                                                            {/* {t("action.addStock")} */}
-                                                          </Button>
-                                                          <Button  variant="ghost"
-                                                        size="sm"
-                                                        className="text-[#0099b5] hover:bg-[#0099b5]/10 p-2 h-9 w-9 rounded-full" onClick={() => handleStockAction(row, "remove")}>
-                                                            <PackageMinus className="h-4 w-4 mr-2 text-orange-600" />
-                                                            {/* {t("action.removeStock")} */}
-                                                          </Button>
-                                                          <Button  variant="ghost"
-                                                        size="sm"
-                                                        className="text-[#0099b5] hover:bg-[#0099b5]/10 p-2 h-9 w-9 rounded-full" onClick={() => handleSell(row)}>
-                                                            <ShoppingCart className="h-4 w-4 mr-2 text-purple-600" />
-                                                            {/* {t("sellGM")} */}
-                                                          </Button>
-                                                          <DropdownMenuSeparator />
-                                                          <Button
-                                                             variant="ghost"
-                                                        size="sm"
-                                                        className="text-[#0099b5] hover:bg-[#0099b5]/10 p-2 h-9 w-9 rounded-full" onClick={() => handleDeleteClick(row)}
-                                                          >
-                                                            <Trash2 className="h-4 w-4 mr-2" />
-                                                            {/* {t("deleteGM")} */}
-                                                          </Button>
+                          <Button
+                            className="text-[#0099b5] hover:bg-[#0099b5]/10 p-2 h-9 w-9 rounded-full"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleStockAction(row, "add")}
+                          >
+                            <PackagePlus className="h-4 w-4 text-green-600" />
+                            {/* {t("action.addStock")} */}
+                          </Button>
+                          <Button
+                            className="text-[#0099b5] hover:bg-[#0099b5]/10 p-2 h-9 w-9 rounded-full"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleStockAction(row, "remove")}
+                          >
+                            <PackageMinus className="h-4 w-4 text-orange-600" />
+                            {/* {t("action.removeStock")} */}
+                          </Button>
+                          <Button
+                            className="text-[#0099b5] hover:bg-[#0099b5]/10 p-2 h-9 w-9 rounded-full"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleSell(row)}
+                          >
+                            <ShoppingCart className="h-4 w-4 text-purple-600" />
+                            {/* {t("sellGM")} */}
+                          </Button>
+                          <DropdownMenuSeparator />
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-[#0099b5] hover:bg-[#0099b5]/10 p-2 h-9 w-9 rounded-full"
+                            onClick={() => handleDeleteClick(row)}
+                          >
+                            <Trash2 className="h-4 w-4 text-red-600" />
+                            {/* {t("deleteGM")} */}
+                          </Button>
                         </div>
                       </div>
                     </CardContent>
@@ -1834,6 +2528,705 @@ export default function DataPage() {
               </CardContent>
             </Card>
           </div>
+
+          <Card className="border-0 shadow-lg">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
+                    <ShoppingCart className="h-4 w-4 lg:h-5 lg:w-5 text-[#0099b5]" />
+                    Sotilgan mahsulotlar tarixi
+                  </CardTitle>
+                  <CardDescription className="text-sm">Barcha sotuvlar va ularning tafsilotlari</CardDescription>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant={salesHistoryFilter === "all" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setSalesHistoryFilter("all")}
+                    className={salesHistoryFilter === "all" ? "bg-[#0099b5] hover:bg-[#0099b5]/90" : ""}
+                  >
+                    Barchasi
+                  </Button>
+                  <Button
+                    variant={salesHistoryFilter === "today" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setSalesHistoryFilter("today")}
+                    className={salesHistoryFilter === "today" ? "bg-[#0099b5] hover:bg-[#0099b5]/90" : ""}
+                  >
+                    Bugun
+                  </Button>
+                  <Button
+                    variant={salesHistoryFilter === "week" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setSalesHistoryFilter("week")}
+                    className={salesHistoryFilter === "week" ? "bg-[#0099b5] hover:bg-[#0099b5]/90" : ""}
+                  >
+                    7 kun
+                  </Button>
+                  <Button
+                    variant={salesHistoryFilter === "month" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setSalesHistoryFilter("month")}
+                    className={salesHistoryFilter === "month" ? "bg-[#0099b5] hover:bg-[#0099b5]/90" : ""}
+                  >
+                    30 kun
+                  </Button>
+                </div>
+              </div>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Input
+                  type="text"
+                  placeholder="Chek raqami yoki mahsulot nomi bo'yicha qidirish..."
+                  value={salesSearchQuery}
+                  onChange={(e) => setSalesSearchQuery(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+            </CardHeader>
+            <CardContent>
+              {/* Sales Statistics Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <Card className="bg-gradient-to-br from-blue-50 to-blue-100">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-blue-700 font-medium">Jami sotuvlar</p>
+                        <p className="text-2xl font-bold text-blue-900">{filteredSales.length}</p>
+                      </div>
+                      <div className="p-3 bg-blue-500 rounded-full">
+                        <Receipt className="h-6 w-6 text-white" />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-gradient-to-br from-green-50 to-green-100">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-green-700 font-medium">Jami summa</p>
+                        <p className="text-2xl font-bold text-green-900">${totalSalesAmount.toLocaleString()}</p>
+                      </div>
+                      <div className="p-3 bg-green-500 rounded-full">
+                        <DollarSign className="h-6 w-6 text-white" />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-gradient-to-br from-purple-50 to-purple-100">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-purple-700 font-medium">Sotilgan mahsulotlar</p>
+                        <p className="text-2xl font-bold text-purple-900">{totalItemsSold}</p>
+                      </div>
+                      <div className="p-3 bg-purple-500 rounded-full">
+                        <Package className="h-6 w-6 text-white" />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Sales History Table */}
+              <div className="border rounded-lg overflow-hidden">
+                <div className="max-h-[500px] overflow-y-auto">
+                  {filteredSales.length === 0 ? (
+                    <div className="p-8 text-center text-gray-500">
+                      <ShoppingCart className="h-12 w-12 mx-auto mb-3 text-gray-400" />
+                      <p>Hozircha sotuvlar yo'q</p>
+                    </div>
+                  ) : (
+                    <table className="w-full">
+                      <thead className="bg-gray-50 sticky top-0">
+                        <tr>
+                          <th className="text-left py-3 px-4 font-semibold text-gray-700 text-sm">Chek raqami</th>
+                          <th className="text-left py-3 px-4 font-semibold text-gray-700 text-sm">Sana va vaqt</th>
+                          <th className="text-left py-3 px-4 font-semibold text-gray-700 text-sm">Mahsulotlar</th>
+                          <th className="text-right py-3 px-4 font-semibold text-gray-700 text-sm">Jami summa</th>
+                          <th className="text-center py-3 px-4 font-semibold text-gray-700 text-sm">Amallar</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {paginatedSales.map((transaction) => {
+                          if (!transaction.saleDate) return null
+                          const saleDate = transaction.saleDate.toDate()
+                          return (
+                            <tr
+                              key={transaction.id}
+                              className="border-t hover:bg-gray-50 cursor-pointer"
+                              onClick={() => {
+                                setSelectedSale(transaction)
+                                setIsSaleDetailsModalOpen(true)
+                              }}
+                            >
+                              <td className="py-3 px-4">
+                                <div className="flex items-center gap-2">
+                                  <Receipt className="h-4 w-4 text-[#0099b5]" />
+                                  <span className="font-mono text-sm">{transaction.receiptNumber}</span>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="text-sm">
+                                  <div className="font-medium text-gray-900">
+                                    {saleDate.toLocaleDateString("uz-UZ", {
+                                      day: "2-digit",
+                                      month: "2-digit",
+                                      year: "numeric",
+                                    })}
+                                  </div>
+                                  <div className="text-gray-500">
+                                    {saleDate.toLocaleTimeString("uz-UZ", {
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    })}
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="space-y-1">
+                                  {transaction.items.slice(0, 2).map((item, idx) => (
+                                    <div key={idx} className="text-sm">
+                                      <span className="font-medium text-gray-900">{item.productName}</span>
+                                      <span className="text-gray-500 ml-2">
+                                        ({item.quantity} x ${item.price.toFixed(2)})
+                                      </span>
+                                    </div>
+                                  ))}
+                                  {transaction.items.length > 2 && (
+                                    <div className="text-sm text-gray-500">
+                                      +{transaction.items.length - 2} ta mahsulot
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 text-right">
+                                <span className="font-bold text-green-600 text-lg">
+                                  ${transaction.totalAmount.toLocaleString()}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4 text-center">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setReceiptData({
+                                      receiptNumber: transaction.receiptNumber,
+                                      items: transaction.items,
+                                      totalAmount: transaction.totalAmount,
+                                      date: saleDate,
+                                    })
+                                    setShowReceipt(true)
+                                  }}
+                                  className="text-[#0099b5] hover:bg-[#0099b5]/10"
+                                >
+                                  <Printer className="h-4 w-4 mr-1" />
+                                  Chek
+                                </Button>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
+
+              {filteredSales.length > 0 && (
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-4 pt-4 border-t">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600">Sahifada:</span>
+                    <Select
+                      value={salesPerPage.toString()}
+                      onValueChange={(value) => {
+                        setSalesPerPage(Number(value))
+                        setSalesPage(1)
+                      }}
+                    >
+                      <SelectTrigger className="w-[100px] h-9">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="10">10</SelectItem>
+                        <SelectItem value="20">20</SelectItem>
+                        <SelectItem value="50">50</SelectItem>
+                        <SelectItem value="100">100</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <span className="text-sm text-gray-600">
+                      {salesStartIndex + 1}-{Math.min(salesEndIndex, filteredSales.length)} / {filteredSales.length}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSalesPage(1)}
+                      disabled={salesPage === 1}
+                      className="h-9"
+                    >
+                      <ChevronsLeft className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSalesPage((prev) => Math.max(1, prev - 1))}
+                      disabled={salesPage === 1}
+                      className="h-9"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <span className="text-sm font-medium px-3">
+                      {salesPage} / {salesTotalPages}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSalesPage((prev) => Math.min(salesTotalPages, prev + 1))}
+                      disabled={salesPage === salesTotalPages}
+                      className="h-9"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSalesPage(salesTotalPages)}
+                      disabled={salesPage === salesTotalPages}
+                      className="h-9"
+                    >
+                      <ChevronsRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="loans" className="space-y-6">
+          {/* Loan Statistics */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">{t("loan.totalLoans")}</CardTitle>
+                <Wallet className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{loans.length}</div>
+                <p className="text-xs text-muted-foreground mt-1">Jami: ${totalLoanAmount.toLocaleString()}</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">{t("loan.pendingLoans")}</CardTitle>
+                <AlertCircle className="h-4 w-4 text-orange-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{pendingLoans.length}</div>
+                <p className="text-xs text-muted-foreground mt-1">To'lanishi kerak</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">{t("loan.paidLoans")}</CardTitle>
+                <CreditCard className="h-4 w-4 text-green-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{loans.filter((l) => l.status === "paid").length}</div>
+                <p className="text-xs text-muted-foreground mt-1">To'langan qarzlar</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Loan Filters */}
+          <Card>
+            <CardHeader>
+              <div className="flex flex-col gap-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>{t("loan.loanList")}</CardTitle>
+                    <CardDescription>Qarzga olganlar ro'yxati va to'lovlar</CardDescription>
+                  </div>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <Input
+                      placeholder="Mijoz ismi, telefon yoki eslatma bo'yicha qidirish..."
+                      value={loanSearchQuery}
+                      onChange={(e) => setLoanSearchQuery(e.target.value)}
+                      className="pl-9 h-10"
+                    />
+                  </div>
+                  <Select value={loanStatusFilter} onValueChange={setLoanStatusFilter}>
+                    <SelectTrigger className="w-full sm:w-[200px] h-10">
+                      <SelectValue placeholder={t("loan.filterStatus")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">{t("loan.allLoans")}</SelectItem>
+                      <SelectItem value="pending">{t("loan.status.pending")}</SelectItem>
+                      <SelectItem value="partial">{t("loan.status.partial")}</SelectItem>
+                      <SelectItem value="paid">{t("loan.status.paid")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {filteredLoans.length === 0 ? (
+                <div className="text-center py-12">
+                  <HandCoins className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                  <p className="text-muted-foreground">
+                    {loanSearchQuery ? "Qidiruv bo'yicha natija topilmadi" : t("loan.noLoans")}
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {renderLoansTable()}
+
+                  {/* Pagination */}
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-6 pt-4 border-t">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-gray-600">Sahifada:</span>
+                      <Select
+                        value={loansPerPage.toString()}
+                        onValueChange={(value) => {
+                          setLoansPerPage(Number(value))
+                          setLoansPage(1)
+                        }}
+                      >
+                        <SelectTrigger className="w-[100px] h-9">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="10">10</SelectItem>
+                          <SelectItem value="20">20</SelectItem>
+                          <SelectItem value="50">50</SelectItem>
+                          <SelectItem value="100">100</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <span className="text-sm text-gray-600">
+                        {loansStartIndex + 1}-{Math.min(loansEndIndex, filteredLoans.length)} / {filteredLoans.length}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setLoansPage((p) => Math.max(1, p - 1))}
+                        disabled={loansPage === 1}
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                      <span className="text-sm text-gray-600">
+                        Sahifa {loansPage} / {loansTotalPages}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setLoansPage((p) => Math.min(loansTotalPages, p + 1))}
+                        disabled={loansPage === loansTotalPages}
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="history" className="space-y-4 lg:space-y-6">
+          <Card className="border-0 shadow-lg">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
+                    <ShoppingCart className="h-4 w-4 lg:h-5 lg:w-5 text-[#0099b5]" />
+                    Sotilgan mahsulotlar tarixi
+                  </CardTitle>
+                  <CardDescription className="text-sm">Barcha sotuvlar va ularning tafsilotlari</CardDescription>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant={salesHistoryFilter === "all" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setSalesHistoryFilter("all")}
+                    className={salesHistoryFilter === "all" ? "bg-[#0099b5] hover:bg-[#0099b5]/90" : ""}
+                  >
+                    Barchasi
+                  </Button>
+                  <Button
+                    variant={salesHistoryFilter === "today" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setSalesHistoryFilter("today")}
+                    className={salesHistoryFilter === "today" ? "bg-[#0099b5] hover:bg-[#0099b5]/90" : ""}
+                  >
+                    Bugun
+                  </Button>
+                  <Button
+                    variant={salesHistoryFilter === "week" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setSalesHistoryFilter("week")}
+                    className={salesHistoryFilter === "week" ? "bg-[#0099b5] hover:bg-[#0099b5]/90" : ""}
+                  >
+                    7 kun
+                  </Button>
+                  <Button
+                    variant={salesHistoryFilter === "month" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setSalesHistoryFilter("month")}
+                    className={salesHistoryFilter === "month" ? "bg-[#0099b5] hover:bg-[#0099b5]/90" : ""}
+                  >
+                    30 kun
+                  </Button>
+                </div>
+              </div>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Input
+                  type="text"
+                  placeholder="Chek raqami yoki mahsulot nomi bo'yicha qidirish..."
+                  value={salesSearchQuery}
+                  onChange={(e) => setSalesSearchQuery(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+            </CardHeader>
+            <CardContent>
+              {/* Sales Statistics Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <Card className="bg-gradient-to-br from-blue-50 to-blue-100">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-blue-700 font-medium">Jami sotuvlar</p>
+                        <p className="text-2xl font-bold text-blue-900">{filteredSales.length}</p>
+                      </div>
+                      <div className="p-3 bg-blue-500 rounded-full">
+                        <Receipt className="h-6 w-6 text-white" />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-gradient-to-br from-green-50 to-green-100">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-green-700 font-medium">Jami summa</p>
+                        <p className="text-2xl font-bold text-green-900">${totalSalesAmount.toLocaleString()}</p>
+                      </div>
+                      <div className="p-3 bg-green-500 rounded-full">
+                        <DollarSign className="h-6 w-6 text-white" />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-gradient-to-br from-purple-50 to-purple-100">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-purple-700 font-medium">Sotilgan mahsulotlar</p>
+                        <p className="text-2xl font-bold text-purple-900">{totalItemsSold}</p>
+                      </div>
+                      <div className="p-3 bg-purple-500 rounded-full">
+                        <Package className="h-6 w-6 text-white" />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Sales History Table */}
+              <div className="border rounded-lg overflow-hidden">
+                <div className="max-h-[500px] overflow-y-auto">
+                  {filteredSales.length === 0 ? (
+                    <div className="p-8 text-center text-gray-500">
+                      <ShoppingCart className="h-12 w-12 mx-auto mb-3 text-gray-400" />
+                      <p>Hozircha sotuvlar yo'q</p>
+                    </div>
+                  ) : (
+                    <table className="w-full">
+                      <thead className="bg-gray-50 sticky top-0">
+                        <tr>
+                          <th className="text-left py-3 px-4 font-semibold text-gray-700 text-sm">Chek raqami</th>
+                          <th className="text-left py-3 px-4 font-semibold text-gray-700 text-sm">Sana va vaqt</th>
+                          <th className="text-left py-3 px-4 font-semibold text-gray-700 text-sm">Mahsulotlar</th>
+                          <th className="text-right py-3 px-4 font-semibold text-gray-700 text-sm">Jami summa</th>
+                          <th className="text-center py-3 px-4 font-semibold text-gray-700 text-sm">Amallar</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {paginatedSales.map((transaction) => {
+                          if (!transaction.saleDate) return null
+                          const saleDate = transaction.saleDate.toDate()
+                          return (
+                            <tr
+                              key={transaction.id}
+                              className="border-t hover:bg-gray-50 cursor-pointer"
+                              onClick={() => {
+                                setSelectedSale(transaction)
+                                setIsSaleDetailsModalOpen(true)
+                              }}
+                            >
+                              <td className="py-3 px-4">
+                                <div className="flex items-center gap-2">
+                                  <Receipt className="h-4 w-4 text-[#0099b5]" />
+                                  <span className="font-mono text-sm">{transaction.receiptNumber}</span>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="text-sm">
+                                  <div className="font-medium text-gray-900">
+                                    {saleDate.toLocaleDateString("uz-UZ", {
+                                      day: "2-digit",
+                                      month: "2-digit",
+                                      year: "numeric",
+                                    })}
+                                  </div>
+                                  <div className="text-gray-500">
+                                    {saleDate.toLocaleTimeString("uz-UZ", {
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    })}
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="space-y-1">
+                                  {transaction.items.slice(0, 2).map((item, idx) => (
+                                    <div key={idx} className="text-sm">
+                                      <span className="font-medium text-gray-900">{item.productName}</span>
+                                      <span className="text-gray-500 ml-2">
+                                        ({item.quantity} x ${item.price.toFixed(2)})
+                                      </span>
+                                    </div>
+                                  ))}
+                                  {transaction.items.length > 2 && (
+                                    <div className="text-sm text-gray-500">
+                                      +{transaction.items.length - 2} ta mahsulot
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 text-right">
+                                <span className="font-bold text-green-600 text-lg">
+                                  ${transaction.totalAmount.toLocaleString()}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4 text-center">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setReceiptData({
+                                      receiptNumber: transaction.receiptNumber,
+                                      items: transaction.items,
+                                      totalAmount: transaction.totalAmount,
+                                      date: saleDate,
+                                    })
+                                    setShowReceipt(true)
+                                  }}
+                                  className="text-[#0099b5] hover:bg-[#0099b5]/10"
+                                >
+                                  <Printer className="h-4 w-4 mr-1" />
+                                  Chek
+                                </Button>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
+
+              {filteredSales.length > 0 && (
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-4 pt-4 border-t">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600">Sahifada:</span>
+                    <Select
+                      value={salesPerPage.toString()}
+                      onValueChange={(value) => {
+                        setSalesPerPage(Number(value))
+                        setSalesPage(1)
+                      }}
+                    >
+                      <SelectTrigger className="w-[100px] h-9">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="10">10</SelectItem>
+                        <SelectItem value="20">20</SelectItem>
+                        <SelectItem value="50">50</SelectItem>
+                        <SelectItem value="100">100</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <span className="text-sm text-gray-600">
+                      {salesStartIndex + 1}-{Math.min(salesEndIndex, filteredSales.length)} / {filteredSales.length}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSalesPage(1)}
+                      disabled={salesPage === 1}
+                      className="h-9"
+                    >
+                      <ChevronsLeft className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSalesPage((prev) => Math.max(1, prev - 1))}
+                      disabled={salesPage === 1}
+                      className="h-9"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <span className="text-sm font-medium px-3">
+                      {salesPage} / {salesTotalPages}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSalesPage((prev) => Math.min(salesTotalPages, prev + 1))}
+                      disabled={salesPage === salesTotalPages}
+                      className="h-9"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSalesPage(salesTotalPages)}
+                      disabled={salesPage === salesTotalPages}
+                      className="h-9"
+                    >
+                      <ChevronsRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
 
@@ -2691,14 +4084,14 @@ export default function DataPage() {
           <DialogHeader>
             <DialogTitle>{t("data.import")}</DialogTitle>
             <DialogDescription>
-              {importFile ? `${importFile.name} faylini import qilmoqchimisiz?` : ""}
+              {importFile ? `${importFile.name} faylini import qilmoqchimisiz?` : ""} {/* Importing file? */}
             </DialogDescription>
           </DialogHeader>
 
           {isUploading && (
             <div className="space-y-4 py-4">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">{t("data.importing")}</span>
+                <span className="text-sm font-medium">{t("data.importing")}</span> {/* Importing... */}
                 <span className="text-sm font-semibold text-[#0099b5]">{Math.round(uploadProgress)}%</span>
               </div>
               <Progress value={uploadProgress} className="h-2" />
@@ -2712,6 +4105,432 @@ export default function DataPage() {
             <Button onClick={handleConfirmImport} disabled={isUploading} className="bg-[#0099b5] hover:bg-[#0099b5]/90">
               {isUploading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Upload className="h-4 w-4 mr-2" />}
               {t("data.import")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isBulkSellModalOpen} onOpenChange={setIsBulkSellModalOpen}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{t("sellProduct")}</DialogTitle>
+            <DialogDescription>Tanlangan mahsulotlarni sotish</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* Sale type selection */}
+            <div className="flex gap-4 p-4 bg-muted rounded-lg">
+              <Button
+                variant={!sellAsLoan ? "default" : "outline"}
+                onClick={() => setSellAsLoan(false)}
+                className="flex-1"
+              >
+                <DollarSign className="h-4 w-4 mr-2" />
+                {t("loan.sellAsCash")}
+              </Button>
+              <Button
+                variant={sellAsLoan ? "default" : "outline"}
+                onClick={() => setSellAsLoan(true)}
+                className="flex-1"
+              >
+                <HandCoins className="h-4 w-4 mr-2" />
+                {t("loan.sellAsLoan")}
+              </Button>
+            </div>
+
+            {/* Customer info for loans */}
+            {sellAsLoan && (
+              <Card className="border-primary">
+                <CardHeader>
+                  <CardTitle className="text-base">Mijoz ma'lumotlari</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <Label htmlFor="customerName">{t("loan.customerName")} *</Label>
+                    <Input
+                      id="customerName"
+                      value={loanCustomerData.customerName}
+                      onChange={(e) => setLoanCustomerData({ ...loanCustomerData, customerName: e.target.value })}
+                      placeholder="Mijoz ismini kiriting"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="customerPhone">{t("loan.customerPhone")}</Label>
+                    <Input
+                      id="customerPhone"
+                      value={loanCustomerData.customerPhone}
+                      onChange={(e) => setLoanCustomerData({ ...loanCustomerData, customerPhone: e.target.value })}
+                      placeholder="+998 90 123 45 67"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="customerAddress">{t("loan.customerAddress")}</Label>
+                    <Input
+                      id="customerAddress"
+                      value={loanCustomerData.customerAddress}
+                      onChange={(e) => setLoanCustomerData({ ...loanCustomerData, customerAddress: e.target.value })}
+                      placeholder="Manzil"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="dueDate">{t("loan.dueDate")}</Label>
+                    <Input
+                      id="dueDate"
+                      type="date"
+                      value={loanCustomerData.dueDate}
+                      onChange={(e) => setLoanCustomerData({ ...loanCustomerData, dueDate: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="notes">{t("loan.notes")}</Label>
+                    <Textarea
+                      id="notes"
+                      value={loanCustomerData.notes}
+                      onChange={(e) => setLoanCustomerData({ ...loanCustomerData, notes: e.target.value })}
+                      placeholder="Qo'shimcha eslatmalar"
+                      rows={3}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Products list */}
+            <div className="space-y-2">
+              {Array.from(selectedProducts)
+                .map((id) => data.find((p) => p.id === id))
+                .filter((p): p is Product => p !== undefined)
+                .map((product) => (
+                  <div key={product.id} className="flex items-center gap-4 p-3 border rounded-lg">
+                    <div className="flex-1">
+                      <p className="font-medium">{product.nomi}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {product.kodi} • {product.kompaniya}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Label className="text-sm">Miqdor:</Label>
+                      <Input
+                        type="number"
+                        min="1"
+                        max={product.stock || 0}
+                        value={bulkSellQuantities[product.id!] || 1}
+                        onChange={(e) =>
+                          setBulkSellQuantities({
+                            ...bulkSellQuantities,
+                            [product.id!]: Number.parseInt(e.target.value) || 1,
+                          })
+                        }
+                        className="w-20"
+                      />
+                    </div>
+                    <div className="text-right min-w-[100px]">
+                      <p className="font-semibold">
+                        $
+                        {(
+                          (Number.parseFloat(product.narxi.replace(/[^\d.]/g, "")) || 0) *
+                          (bulkSellQuantities[product.id!] || 1)
+                        ).toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+            </div>
+
+            {/* Total */}
+            <div className="flex justify-between items-center p-4 bg-primary/10 rounded-lg">
+              <span className="font-semibold text-lg">{t("totalAmount")}:</span>
+              <span className="font-bold text-2xl">
+                $
+                {Array.from(selectedProducts)
+                  .map((id) => data.find((p) => p.id === id))
+                  .filter((p): p is Product => p !== undefined)
+                  .reduce((sum, product) => {
+                    const price = Number.parseFloat(product.narxi.replace(/[^\d.]/g, "")) || 0
+                    const quantity = bulkSellQuantities[product.id!] || 1
+                    return sum + price * quantity
+                  }, 0)
+                  .toLocaleString()}
+              </span>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsBulkSellModalOpen(false)}>
+              {t("cancel")}
+            </Button>
+            <Button onClick={handleBulkSell} disabled={isSubmitting}>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Yuklanmoqda...
+                </>
+              ) : (
+                <>
+                  <ShoppingCart className="mr-2 h-4 w-4" />
+                  {sellAsLoan ? t("loan.sellAsLoan") : t("confirmSale")}
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isLoanPaymentModalOpen} onOpenChange={setIsLoanPaymentModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("loan.addPayment")}</DialogTitle>
+            <DialogDescription>{selectedLoan?.customerName} uchun to'lov qo'shish</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="p-4 bg-muted rounded-lg space-y-2">
+              <div className="flex justify-between">
+                <span className="text-sm text-muted-foreground">{t("loan.totalAmount")}:</span>
+                <span className="font-semibold">${selectedLoan?.totalAmount.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-sm text-muted-foreground">{t("loan.amountPaid")}:</span>
+                <span className="font-semibold text-green-600">
+                  ${(selectedLoan?.amountPaid || 0).toLocaleString()}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-sm text-muted-foreground">{t("loan.amountRemaining")}:</span>
+                <span className="font-semibold text-orange-600">
+                  ${(selectedLoan?.amountRemaining || 0).toLocaleString()}
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <Label htmlFor="paymentAmount">{t("loan.paymentAmount")} *</Label>
+              <Input
+                id="paymentAmount"
+                type="number"
+                min="0"
+                max={selectedLoan?.amountRemaining || 0}
+                value={loanPaymentData.amount}
+                onChange={(e) => setLoanPaymentData({ ...loanPaymentData, amount: e.target.value })}
+                placeholder="0.00"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="paymentNote">{t("loan.paymentNote")}</Label>
+              <Textarea
+                id="paymentNote"
+                value={loanPaymentData.note}
+                onChange={(e) => setLoanPaymentData({ ...loanPaymentData, note: e.target.value })}
+                placeholder="Qo'shimcha izoh"
+                rows={3}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsLoanPaymentModalOpen(false)}>
+              {t("cancel")}
+            </Button>
+            <Button onClick={handleAddLoanPayment} disabled={isSubmitting}>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Yuklanmoqda...
+                </>
+              ) : (
+                <>
+                  <CreditCard className="mr-2 h-4 w-4" />
+                  To'lov qo'shish
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isLoanDetailsModalOpen} onOpenChange={setIsLoanDetailsModalOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{t("loan.viewDetails")}</DialogTitle>
+            <DialogDescription>{selectedLoan?.customerName}</DialogDescription>
+          </DialogHeader>
+
+          {selectedLoan && (
+            <div className="space-y-6">
+              {/* Customer Info */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Mijoz ma'lumotlari</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Ism:</span>
+                    <span className="font-medium">{selectedLoan.customerName}</span>
+                  </div>
+                  {selectedLoan.customerPhone && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Telefon:</span>
+                      <span className="font-medium">{selectedLoan.customerPhone}</span>
+                    </div>
+                  )}
+                  {selectedLoan.customerAddress && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Manzil:</span>
+                      <span className="font-medium">{selectedLoan.customerAddress}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Chek raqami:</span>
+                    <span className="font-medium">{selectedLoan.receiptNumber}</span>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Payment Info */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">To'lov ma'lumotlari</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">{t("loan.totalAmount")}:</span>
+                    <span className="font-semibold">${selectedLoan.totalAmount.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">{t("loan.amountPaid")}:</span>
+                    <span className="font-semibold text-green-600">
+                      ${(selectedLoan.amountPaid || 0).toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">{t("loan.amountRemaining")}:</span>
+                    <span className="font-semibold text-orange-600">
+                      ${(selectedLoan.amountRemaining || 0).toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">{t("loan.status")}:</span>
+                    <Badge
+                      variant={
+                        selectedLoan.status === "paid"
+                          ? "default"
+                          : selectedLoan.status === "partial"
+                            ? "secondary"
+                            : "destructive"
+                      }
+                    >
+                      {t(`loan.status.${selectedLoan.status}`)}
+                    </Badge>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Payment History */}
+              {selectedLoan.paymentHistory && selectedLoan.paymentHistory.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">{t("loan.paymentHistory")}</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {selectedLoan.paymentHistory.map((payment, index) => (
+                        <div key={index} className="flex justify-between items-start p-3 bg-muted rounded-lg">
+                          <div>
+                            <p className="font-semibold">${payment.amount.toLocaleString()}</p>
+                            <p className="text-sm text-muted-foreground">
+                              {payment.date?.toDate?.()?.toLocaleDateString("uz-UZ") || "N/A"}
+                            </p>
+                            {payment.note && <p className="text-sm text-muted-foreground mt-1">{payment.note}</p>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsLoanDetailsModalOpen(false)}>
+              Yopish
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Receipt Modal - Thermal Printer Design (XP 90) */}
+      <Dialog open={showReceipt} onOpenChange={setShowReceipt}>
+        <DialogContent className="max-w-[400px] p-0">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Chek</DialogTitle>
+          </DialogHeader>
+          {receiptData && (
+            <div className="receipt-container bg-white p-6 text-black" style={{ fontFamily: "monospace" }}>
+              <div className="text-center mb-4">
+                <h2 className="text-xl font-bold mb-1">SAVDO CHEKI</h2>
+                <p className="text-xs">Chek: {receiptData.receiptNumber}</p>
+                <p className="text-xs">
+                  {receiptData.date instanceof Date
+                    ? receiptData.date.toLocaleString("uz-UZ", {
+                        day: "2-digit",
+                        month: "2-digit",
+                        year: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })
+                    : receiptData.date}
+                </p>
+              </div>
+
+              <div className="border-t border-dashed border-gray-400 my-3"></div>
+
+              {/* Products List */}
+              <div className="space-y-3 text-sm">
+                {receiptData.items.map((item: any, index: number) => (
+                  <div key={index} className="space-y-1">
+                    <div className="font-bold">{item.productName}</div>
+                    <div className="text-xs space-y-0.5">
+                      <div>Kod: {item.productCode}</div>
+                      <div>Model: {item.model || "N/A"}</div>
+                      {item.location && <div>Joy: {item.location}</div>}
+                      <div className="flex justify-between mt-1">
+                        <span>
+                          {item.quantity} x ${item.price.toFixed(2)}
+                        </span>
+                        <span className="font-semibold">${(item.quantity * item.price).toFixed(2)}</span>
+                      </div>
+                    </div>
+                    {index < receiptData.items.length - 1 && (
+                      <div className="border-t border-dotted border-gray-300 mt-2"></div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <div className="border-t border-dashed border-gray-400 my-3"></div>
+
+              {/* Total */}
+              <div className="flex justify-between text-lg font-bold">
+                <span>JAMI:</span>
+                <span>${receiptData.totalAmount.toLocaleString()}</span>
+              </div>
+
+              <div className="border-t border-dashed border-gray-400 my-3"></div>
+
+              <div className="text-center text-xs">
+                <p>Xaridingiz uchun rahmat!</p>
+              </div>
+            </div>
+          )}
+          <DialogFooter className="p-4 pt-0">
+            <Button variant="outline" onClick={() => setShowReceipt(false)} className="flex-1">
+              Yopish
+            </Button>
+            <Button onClick={printReceipt} className="bg-[#0099b5] hover:bg-[#0099b5]/90 flex-1">
+              <Printer className="h-4 w-4 mr-2" />
+              Chop etish
             </Button>
           </DialogFooter>
         </DialogContent>

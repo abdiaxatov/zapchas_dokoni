@@ -45,13 +45,13 @@ import {
 import { getProducts, type Product } from "@/lib/firebase-operations"
 import { getGMs, type GM } from "@/lib/firebase-gm-operations"
 import { cn } from "@/lib/utils"
+import * as XLSX from "xlsx"
 
 const parsePrice = (price: string | number | undefined): number => {
   if (typeof price === "number") return price
   if (!price) return 0
   const cleaned = String(price).replace(/[^\d.]/g, "")
-  const parsed = Number.parseFloat(cleaned)
-  return isNaN(parsed) ? 0 : parsed
+  return Number.parseFloat(cleaned) || 0
 }
 
 const filterByDateRange = (items: (Product | GM)[], range: string) => {
@@ -87,33 +87,6 @@ const filterByDateRange = (items: (Product | GM)[], range: string) => {
   })
 }
 
-const exportToCSV = (data: any[], filename: string) => {
-  if (data.length === 0) return
-
-  const headers = Object.keys(data[0])
-  const csvContent = [
-    headers.join(","),
-    ...data.map((row) =>
-      headers
-        .map((header) => {
-          const value = row[header]
-          return typeof value === "string" && value.includes(",") ? `"${value}"` : value
-        })
-        .join(","),
-    ),
-  ].join("\n")
-
-  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
-  const link = document.createElement("a")
-  const url = URL.createObjectURL(blob)
-  link.setAttribute("href", url)
-  link.setAttribute("download", filename)
-  link.style.visibility = "hidden"
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
-}
-
 export default function AnalyticsPage() {
   const { user } = useAuth()
   const { t } = useLanguage()
@@ -132,15 +105,8 @@ export default function AnalyticsPage() {
     try {
       setLoading(true)
       const [products, gms] = await Promise.all([getProducts(), getGMs()])
-
-      const activeProducts = products.filter((p) => !p.isStatic && !p.isDeleted)
-      const activeGMs = gms.filter((g) => !g.isStatic && !g.isDeleted)
-
-      console.log("[v0] Loaded products:", activeProducts.length)
-      console.log("[v0] Loaded GMs:", activeGMs.length)
-
-      setProductsData(activeProducts)
-      setGmsData(activeGMs)
+      setProductsData(products.filter((p) => !p.isStatic || p.sold || p.lastSold))
+      setGmsData(gms.filter((g) => !g.isStatic || g.sold || g.lastSold))
     } catch (error) {
       console.error("Error loading data:", error)
     } finally {
@@ -160,11 +126,7 @@ export default function AnalyticsPage() {
   const productsAnalytics = {
     totalItems: productsData.length || 0,
     totalSales: filteredProducts.reduce((sum, product) => sum + (product.sold || 0), 0),
-    totalRevenue: filteredProducts.reduce((sum, product) => {
-      const price = parsePrice(product.narxi)
-      const sold = product.sold || 0
-      return sum + price * sold
-    }, 0),
+    totalRevenue: filteredProducts.reduce((sum, product) => sum + (product.sold || 0) * parsePrice(product.narxi), 0),
     totalStock: productsData.reduce((sum, product) => sum + (product.stock || 0), 0),
     averagePrice:
       productsData.length > 0
@@ -172,34 +134,19 @@ export default function AnalyticsPage() {
         : 0,
     lowStockItems: productsData.filter((product) => (product.stock || 0) <= (product.minStock || 5)).length,
     outOfStockItems: productsData.filter((product) => (product.stock || 0) === 0).length,
-    inventoryValue: productsData.reduce((sum, product) => {
-      const price = parsePrice(product.narxi)
-      const stock = product.stock || 0
-      return sum + price * stock
-    }, 0),
+    inventoryValue: productsData.reduce((sum, product) => sum + (product.stock || 0) * parsePrice(product.narxi), 0),
   }
 
   const gmsAnalytics = {
     totalItems: gmsData.length || 0,
     totalSales: filteredGMs.reduce((sum, gm) => sum + (gm.sold || 0), 0),
-    totalRevenue: filteredGMs.reduce((sum, gm) => {
-      const price = parsePrice(gm.narxi)
-      const sold = gm.sold || 0
-      return sum + price * sold
-    }, 0),
+    totalRevenue: filteredGMs.reduce((sum, gm) => sum + (gm.sold || 0) * parsePrice(gm.narxi), 0),
     totalStock: gmsData.reduce((sum, gm) => sum + (gm.stock || 0), 0),
     averagePrice: gmsData.length > 0 ? gmsData.reduce((sum, gm) => sum + parsePrice(gm.narxi), 0) / gmsData.length : 0,
     lowStockItems: gmsData.filter((gm) => (gm.stock || 0) <= (gm.minStock || 5)).length,
     outOfStockItems: gmsData.filter((gm) => (gm.stock || 0) === 0).length,
-    inventoryValue: gmsData.reduce((sum, gm) => {
-      const price = parsePrice(gm.narxi)
-      const stock = gm.stock || 0
-      return sum + price * stock
-    }, 0),
+    inventoryValue: gmsData.reduce((sum, gm) => sum + (gm.stock || 0) * parsePrice(gm.narxi), 0),
   }
-
-  console.log("[v0] Products Revenue:", productsAnalytics.totalRevenue)
-  console.log("[v0] GMs Revenue:", gmsAnalytics.totalRevenue)
 
   const combinedAnalytics = {
     totalItems: productsAnalytics.totalItems + gmsAnalytics.totalItems,
@@ -218,23 +165,67 @@ export default function AnalyticsPage() {
     profitMargin: (() => {
       const totalRevenue = productsAnalytics.totalRevenue + gmsAnalytics.totalRevenue
       const totalProfit =
-        filteredProducts.reduce((sum, product) => {
-          const price = parsePrice(product.narxi)
-          const cost = parsePrice(product.cost)
-          const sold = product.sold || 0
-          return sum + (price - cost) * sold
-        }, 0) +
-        filteredGMs.reduce((sum, gm) => {
-          const price = parsePrice(gm.narxi)
-          const cost = parsePrice(gm.cost)
-          const sold = gm.sold || 0
-          return sum + (price - cost) * sold
-        }, 0)
+        filteredProducts.reduce(
+          (sum, product) => sum + (parsePrice(product.narxi) - parsePrice(product.cost)) * (product.sold || 0),
+          0,
+        ) + filteredGMs.reduce((sum, gm) => sum + (parsePrice(gm.narxi) - parsePrice(gm.cost)) * (gm.sold || 0), 0)
       return totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0
     })(),
   }
 
-  console.log("[v0] Combined Revenue:", combinedAnalytics.totalRevenue)
+  const generateSalesTrendData = () => {
+    const daysToShow = timeRange === "7d" ? 7 : timeRange === "30d" ? 30 : timeRange === "1y" ? 12 : 30
+    const isMonthly = timeRange === "1y"
+    const data: any[] = []
+
+    for (let i = daysToShow - 1; i >= 0; i--) {
+      const date = new Date()
+      if (isMonthly) {
+        date.setMonth(date.getMonth() - i)
+      } else {
+        date.setDate(date.getDate() - i)
+      }
+
+      const dateStr = isMonthly
+        ? date.toLocaleDateString("en-US", { month: "short" })
+        : date.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+
+      const dayProducts = filteredProducts.filter((p) => {
+        if (!p.lastSold) return false
+        const soldDate = p.lastSold.toDate()
+        if (isMonthly) {
+          return soldDate.getMonth() === date.getMonth() && soldDate.getFullYear() === date.getFullYear()
+        }
+        return soldDate.toDateString() === date.toDateString()
+      })
+
+      const dayGMs = filteredGMs.filter((g) => {
+        if (!g.lastSold) return false
+        const soldDate = g.lastSold.toDate()
+        if (isMonthly) {
+          return soldDate.getMonth() === date.getMonth() && soldDate.getFullYear() === date.getFullYear()
+        }
+        return soldDate.toDateString() === date.toDateString()
+      })
+
+      const productsSales = dayProducts.reduce((sum, p) => sum + (p.sold || 0), 0)
+      const gmsSales = dayGMs.reduce((sum, g) => sum + (g.sold || 0), 0)
+      const productsRevenue = dayProducts.reduce((sum, p) => sum + (p.sold || 0) * parsePrice(p.narxi), 0)
+      const gmsRevenue = dayGMs.reduce((sum, g) => sum + (g.sold || 0) * parsePrice(g.narxi), 0)
+
+      data.push({
+        date: dateStr,
+        products: productsSales,
+        gms: gmsSales,
+        productsRevenue,
+        gmsRevenue,
+      })
+    }
+
+    return data
+  }
+
+  const salesTrendData = generateSalesTrendData()
 
   const combinedCompanyData = Object.entries(
     [...filteredProducts, ...filteredGMs].reduce(
@@ -243,10 +234,8 @@ export default function AnalyticsPage() {
         if (!acc[company]) {
           acc[company] = { sales: 0, revenue: 0, items: 0 }
         }
-        const price = parsePrice(item.narxi)
-        const sold = item.sold || 0
-        acc[company].sales += sold
-        acc[company].revenue += price * sold
+        acc[company].sales += item.sold || 0
+        acc[company].revenue += (item.sold || 0) * parsePrice(item.narxi)
         acc[company].items += 1
         return acc
       },
@@ -313,48 +302,7 @@ export default function AnalyticsPage() {
     { name: "GMs Out of Stock", value: gmsAnalytics.outOfStockItems, color: "#dc2626" },
   ]
 
-  const salesTrendData = (() => {
-    const monthlyData: Record<string, { products: number; gms: number; productsRevenue: number; gmsRevenue: number }> =
-      {}
-
-    filteredProducts.forEach((product) => {
-      if (product.lastSold) {
-        const date = product.lastSold.toDate()
-        const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`
-        if (!monthlyData[monthKey]) {
-          monthlyData[monthKey] = { products: 0, gms: 0, productsRevenue: 0, gmsRevenue: 0 }
-        }
-        const price = parsePrice(product.narxi)
-        const sold = product.sold || 0
-        monthlyData[monthKey].products += sold
-        monthlyData[monthKey].productsRevenue += price * sold
-      }
-    })
-
-    filteredGMs.forEach((gm) => {
-      if (gm.lastSold) {
-        const date = gm.lastSold.toDate()
-        const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`
-        if (!monthlyData[monthKey]) {
-          monthlyData[monthKey] = { products: 0, gms: 0, productsRevenue: 0, gmsRevenue: 0 }
-        }
-        const price = parsePrice(gm.narxi)
-        const sold = gm.sold || 0
-        monthlyData[monthKey].gms += sold
-        monthlyData[monthKey].gmsRevenue += price * sold
-      }
-    })
-
-    return Object.entries(monthlyData)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([month, data]) => ({
-        month: new Date(month + "-01").toLocaleDateString("en-US", { month: "short" }),
-        ...data,
-      }))
-  })()
-
   const bestSellingProducts = filteredProducts
-    .filter((p) => (p.sold || 0) > 0)
     .sort((a, b) => (b.sold || 0) - (a.sold || 0))
     .slice(0, 5)
     .map((product, index) => ({
@@ -367,7 +315,6 @@ export default function AnalyticsPage() {
     }))
 
   const bestSellingGMs = filteredGMs
-    .filter((g) => (g.sold || 0) > 0)
     .sort((a, b) => (b.sold || 0) - (a.sold || 0))
     .slice(0, 5)
     .map((gm, index) => ({
@@ -386,30 +333,84 @@ export default function AnalyticsPage() {
     { name: "Inventory Turnover", value: 4.2, change: 0.3, trend: "up" },
   ]
 
-  const handleExport = () => {
-    const exportData = [
-      ...filteredProducts.map((p) => ({
-        Type: "Product",
-        Code: p.kodi,
-        Name: p.nomi,
-        Company: p.kompaniya,
-        Price: parsePrice(p.narxi),
-        Sold: p.sold || 0,
-        Stock: p.stock || 0,
-        Revenue: (p.sold || 0) * parsePrice(p.narxi),
-      })),
-      ...filteredGMs.map((g) => ({
-        Type: "GM",
-        Code: g.kodi,
-        Name: g.nomi,
-        Company: g.kompaniya,
-        Price: parsePrice(g.narxi),
-        Sold: g.sold || 0,
-        Stock: g.stock || 0,
-        Revenue: (g.sold || 0) * parsePrice(g.narxi),
-      })),
+  const handleExportToExcel = () => {
+    const wb = XLSX.utils.book_new()
+
+    // Overview sheet
+    const overviewData = [
+      ["Metric", "Products", "GMs", "Combined"],
+      ["Total Items", productsAnalytics.totalItems, gmsAnalytics.totalItems, combinedAnalytics.totalItems],
+      ["Total Sales", productsAnalytics.totalSales, gmsAnalytics.totalSales, combinedAnalytics.totalSales],
+      [
+        "Total Revenue",
+        `$${productsAnalytics.totalRevenue.toFixed(2)}`,
+        `$${gmsAnalytics.totalRevenue.toFixed(2)}`,
+        `$${combinedAnalytics.totalRevenue.toFixed(2)}`,
+      ],
+      [
+        "Average Price",
+        `$${productsAnalytics.averagePrice.toFixed(2)}`,
+        `$${gmsAnalytics.averagePrice.toFixed(2)}`,
+        `$${combinedAnalytics.averagePrice.toFixed(2)}`,
+      ],
+      [
+        "Inventory Value",
+        `$${productsAnalytics.inventoryValue.toFixed(2)}`,
+        `$${gmsAnalytics.inventoryValue.toFixed(2)}`,
+        `$${combinedAnalytics.inventoryValue.toFixed(2)}`,
+      ],
+      ["Low Stock Items", productsAnalytics.lowStockItems, gmsAnalytics.lowStockItems, combinedAnalytics.lowStockItems],
+      [
+        "Out of Stock Items",
+        productsAnalytics.outOfStockItems,
+        gmsAnalytics.outOfStockItems,
+        combinedAnalytics.outOfStockItems,
+      ],
     ]
-    exportToCSV(exportData, `analytics-${timeRange}-${new Date().toISOString().split("T")[0]}.csv`)
+    const wsOverview = XLSX.utils.aoa_to_sheet(overviewData)
+    XLSX.utils.book_append_sheet(wb, wsOverview, "Overview")
+
+    // Products sheet
+    const productsExportData = filteredProducts.map((p) => ({
+      Kodi: p.kodi,
+      Model: p.model,
+      Nomi: p.nomi,
+      Kompaniya: p.kompaniya,
+      Narxi: parsePrice(p.narxi),
+      Sold: p.sold || 0,
+      Stock: p.stock || 0,
+      Revenue: (p.sold || 0) * parsePrice(p.narxi),
+      Category: p.category || "",
+      Status: p.status || "",
+    }))
+    const wsProducts = XLSX.utils.json_to_sheet(productsExportData)
+    XLSX.utils.book_append_sheet(wb, wsProducts, "Products")
+
+    // GMs sheet
+    const gmsExportData = filteredGMs.map((g) => ({
+      Kodi: g.kodi,
+      Model: g.model,
+      Nomi: g.nomi,
+      Kompaniya: g.kompaniya,
+      Narxi: parsePrice(g.narxi),
+      Sold: g.sold || 0,
+      Stock: g.stock || 0,
+      Revenue: (g.sold || 0) * parsePrice(g.narxi),
+      Category: g.category || "",
+      Status: g.status || "",
+    }))
+    const wsGMs = XLSX.utils.json_to_sheet(gmsExportData)
+    XLSX.utils.book_append_sheet(wb, wsGMs, "GMs")
+
+    // Sales Trend sheet
+    const wsSalesTrend = XLSX.utils.json_to_sheet(salesTrendData)
+    XLSX.utils.book_append_sheet(wb, wsSalesTrend, "Sales Trend")
+
+    // Top Companies sheet
+    const wsCompanies = XLSX.utils.json_to_sheet(combinedCompanyData)
+    XLSX.utils.book_append_sheet(wb, wsCompanies, "Top Companies")
+
+    XLSX.writeFile(wb, `Analytics_Report_${new Date().toISOString().split("T")[0]}.xlsx`)
   }
 
   if (loading) {
@@ -443,11 +444,11 @@ export default function AnalyticsPage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="today">Today</SelectItem>
-              <SelectItem value="yesterday">Yesterday</SelectItem>
-              <SelectItem value="7d">Last 7 Days</SelectItem>
-              <SelectItem value="30d">Last 30 Days</SelectItem>
-              <SelectItem value="1y">Last Year</SelectItem>
+              <SelectItem value="today">Bugun</SelectItem>
+              <SelectItem value="yesterday">Kecha</SelectItem>
+              <SelectItem value="7d">7 kun</SelectItem>
+              <SelectItem value="30d">30 kun</SelectItem>
+              <SelectItem value="1y">1 yil</SelectItem>
             </SelectContent>
           </Select>
 
@@ -461,9 +462,9 @@ export default function AnalyticsPage() {
             {t("common.refresh")}
           </Button>
 
-          <Button onClick={handleExport} className="flex items-center gap-2 bg-[#0099b5] hover:bg-[#0099b5]/90">
+          <Button onClick={handleExportToExcel} className="flex items-center gap-2 bg-[#0099b5] hover:bg-[#0099b5]/90">
             <Download className="h-4 w-4" />
-            Export Excel
+            Excel
           </Button>
         </div>
       </div>
@@ -517,11 +518,7 @@ export default function AnalyticsPage() {
                 </div>
                 <p className="text-xs lg:text-sm font-medium text-emerald-700 truncate">Total Revenue</p>
                 <p className="text-sm sm:text-lg lg:text-2xl font-bold text-emerald-900">
-                  ${combinedAnalytics.totalRevenue.toLocaleString()}
-                </p>
-                <p className="text-xs text-emerald-600 mt-1">
-                  P: ${productsAnalytics.totalRevenue.toLocaleString()} | G: $
-                  {gmsAnalytics.totalRevenue.toLocaleString()}
+                  ${combinedAnalytics.totalRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                 </p>
               </CardContent>
             </Card>
@@ -557,7 +554,7 @@ export default function AnalyticsPage() {
                 </div>
                 <p className="text-xs lg:text-sm font-medium text-indigo-700 truncate">Inventory Value</p>
                 <p className="text-sm sm:text-lg lg:text-2xl font-bold text-indigo-900">
-                  ${combinedAnalytics.inventoryValue.toLocaleString()}
+                  ${combinedAnalytics.inventoryValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                 </p>
               </CardContent>
             </Card>
@@ -604,6 +601,7 @@ export default function AnalyticsPage() {
           </Card>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Combined Sales Trend */}
             <Card className="border-0 shadow-lg">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -613,33 +611,28 @@ export default function AnalyticsPage() {
                 <CardDescription>Products vs GMs sales over time</CardDescription>
               </CardHeader>
               <CardContent>
-                {salesTrendData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={300}>
-                    <ComposedChart data={salesTrendData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="month" />
-                      <YAxis />
-                      <Tooltip />
-                      <Bar dataKey="products" fill="#0099b5" name="Products Sales" />
-                      <Bar dataKey="gms" fill="#8b5cf6" name="GMs Sales" />
-                      <Line
-                        type="monotone"
-                        dataKey="productsRevenue"
-                        stroke="#10b981"
-                        strokeWidth={2}
-                        name="Products Revenue"
-                      />
-                      <Line type="monotone" dataKey="gmsRevenue" stroke="#f59e0b" strokeWidth={2} name="GMs Revenue" />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="flex items-center justify-center h-[300px] text-gray-500">
-                    No sales data available for the selected period
-                  </div>
-                )}
+                <ResponsiveContainer width="100%" height={300}>
+                  <ComposedChart data={salesTrendData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="date" />
+                    <YAxis />
+                    <Tooltip />
+                    <Bar dataKey="products" fill="#0099b5" name="Products Sales" />
+                    <Bar dataKey="gms" fill="#8b5cf6" name="GMs Sales" />
+                    <Line
+                      type="monotone"
+                      dataKey="productsRevenue"
+                      stroke="#10b981"
+                      strokeWidth={2}
+                      name="Products Revenue"
+                    />
+                    <Line type="monotone" dataKey="gmsRevenue" stroke="#f59e0b" strokeWidth={2} name="GMs Revenue" />
+                  </ComposedChart>
+                </ResponsiveContainer>
               </CardContent>
             </Card>
 
+            {/* Combined Company Performance */}
             <Card className="border-0 shadow-lg">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -649,21 +642,15 @@ export default function AnalyticsPage() {
                 <CardDescription>Best performing companies across all items</CardDescription>
               </CardHeader>
               <CardContent>
-                {combinedCompanyData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={combinedCompanyData} layout="vertical">
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis type="number" />
-                      <YAxis dataKey="name" type="category" width={100} />
-                      <Tooltip />
-                      <Bar dataKey="revenue" fill="#0099b5" name="Revenue" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="flex items-center justify-center h-[300px] text-gray-500">
-                    No company data available
-                  </div>
-                )}
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={combinedCompanyData} layout="vertical">
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis type="number" />
+                    <YAxis dataKey="name" type="category" width={100} />
+                    <Tooltip />
+                    <Bar dataKey="revenue" fill="#0099b5" name="Revenue" />
+                  </BarChart>
+                </ResponsiveContainer>
               </CardContent>
             </Card>
 
@@ -720,13 +707,11 @@ export default function AnalyticsPage() {
               <CardContent className="space-y-6">
                 <div className="text-center">
                   <div className="text-4xl font-bold text-[#0099b5] mb-2">
-                    {combinedAnalytics.totalStock > 0
-                      ? Math.round(
-                          ((combinedAnalytics.totalStock - combinedAnalytics.outOfStockItems) /
-                            combinedAnalytics.totalStock) *
-                            100,
-                        )
-                      : 0}
+                    {Math.round(
+                      ((combinedAnalytics.totalStock - combinedAnalytics.outOfStockItems) /
+                        Math.max(combinedAnalytics.totalStock, 1)) *
+                        100,
+                    )}
                     %
                   </div>
                   <p className="text-gray-600">Overall Health Score</p>
@@ -737,23 +722,19 @@ export default function AnalyticsPage() {
                     <div className="flex justify-between text-sm mb-1">
                       <span>Stock Availability</span>
                       <span>
-                        {combinedAnalytics.totalStock > 0
-                          ? Math.round(
-                              ((combinedAnalytics.totalStock - combinedAnalytics.outOfStockItems) /
-                                combinedAnalytics.totalStock) *
-                                100,
-                            )
-                          : 0}
+                        {Math.round(
+                          ((combinedAnalytics.totalStock - combinedAnalytics.outOfStockItems) /
+                            Math.max(combinedAnalytics.totalStock, 1)) *
+                            100,
+                        )}
                         %
                       </span>
                     </div>
                     <Progress
                       value={
-                        combinedAnalytics.totalStock > 0
-                          ? ((combinedAnalytics.totalStock - combinedAnalytics.outOfStockItems) /
-                              combinedAnalytics.totalStock) *
-                            100
-                          : 0
+                        ((combinedAnalytics.totalStock - combinedAnalytics.outOfStockItems) /
+                          Math.max(combinedAnalytics.totalStock, 1)) *
+                        100
                       }
                       className="h-2"
                     />
@@ -779,6 +760,7 @@ export default function AnalyticsPage() {
             </Card>
           </div>
 
+          {/* Best Sellers Combined */}
           <Card className="border-0 shadow-lg">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -791,9 +773,9 @@ export default function AnalyticsPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <h3 className="font-semibold text-lg mb-4 text-[#0099b5]">Top Products</h3>
-                  {bestSellingProducts.length > 0 ? (
-                    <div className="space-y-3">
-                      {bestSellingProducts.map((product) => (
+                  <div className="space-y-3">
+                    {bestSellingProducts.length > 0 ? (
+                      bestSellingProducts.map((product) => (
                         <div
                           key={product.rank}
                           className="flex items-center justify-between p-3 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors"
@@ -809,21 +791,23 @@ export default function AnalyticsPage() {
                           </div>
                           <div className="text-right">
                             <p className="font-bold text-[#0099b5] text-sm">{product.sold}</p>
-                            <p className="text-xs text-gray-500">${product.revenue.toLocaleString()}</p>
+                            <p className="text-xs text-gray-500">
+                              ${product.revenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                            </p>
                           </div>
                         </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center text-gray-500 py-8">No product sales data</div>
-                  )}
+                      ))
+                    ) : (
+                      <p className="text-gray-500 text-center py-4">No sales data available</p>
+                    )}
+                  </div>
                 </div>
 
                 <div>
                   <h3 className="font-semibold text-lg mb-4 text-purple-600">Top GMs</h3>
-                  {bestSellingGMs.length > 0 ? (
-                    <div className="space-y-3">
-                      {bestSellingGMs.map((gm) => (
+                  <div className="space-y-3">
+                    {bestSellingGMs.length > 0 ? (
+                      bestSellingGMs.map((gm) => (
                         <div
                           key={gm.rank}
                           className="flex items-center justify-between p-3 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors"
@@ -839,14 +823,16 @@ export default function AnalyticsPage() {
                           </div>
                           <div className="text-right">
                             <p className="font-bold text-purple-600 text-sm">{gm.sold}</p>
-                            <p className="text-xs text-gray-500">${gm.revenue.toLocaleString()}</p>
+                            <p className="text-xs text-gray-500">
+                              ${gm.revenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                            </p>
                           </div>
                         </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center text-gray-500 py-8">No GM sales data</div>
-                  )}
+                      ))
+                    ) : (
+                      <p className="text-gray-500 text-center py-4">No sales data available</p>
+                    )}
+                  </div>
                 </div>
               </div>
             </CardContent>
@@ -875,7 +861,7 @@ export default function AnalyticsPage() {
                 <DollarSign className="h-6 w-6 text-emerald-500 mx-auto mb-2" />
                 <p className="text-sm font-medium text-emerald-700">Revenue</p>
                 <p className="text-2xl font-bold text-emerald-900">
-                  ${productsAnalytics.totalRevenue.toLocaleString()}
+                  ${productsAnalytics.totalRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                 </p>
               </CardContent>
             </Card>
@@ -893,23 +879,27 @@ export default function AnalyticsPage() {
               <CardTitle>Products Category Distribution</CardTitle>
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={300}>
-                <RechartsPieChart>
-                  <Pie
-                    data={productsCategoryData}
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={100}
-                    dataKey="value"
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                  >
-                    {productsCategoryData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={`hsl(${index * 45}, 70%, 60%)`} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                </RechartsPieChart>
-              </ResponsiveContainer>
+              {productsCategoryData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={300}>
+                  <RechartsPieChart>
+                    <Pie
+                      data={productsCategoryData}
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={100}
+                      dataKey="value"
+                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    >
+                      {productsCategoryData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={`hsl(${index * 45}, 70%, 60%)`} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </RechartsPieChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="text-gray-500 text-center py-8">No category data available</p>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -935,7 +925,9 @@ export default function AnalyticsPage() {
               <CardContent className="p-4 text-center">
                 <DollarSign className="h-6 w-6 text-emerald-500 mx-auto mb-2" />
                 <p className="text-sm font-medium text-emerald-700">Revenue</p>
-                <p className="text-2xl font-bold text-emerald-900">${gmsAnalytics.totalRevenue.toLocaleString()}</p>
+                <p className="text-2xl font-bold text-emerald-900">
+                  ${gmsAnalytics.totalRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                </p>
               </CardContent>
             </Card>
             <Card className="border-0 shadow-lg bg-gradient-to-br from-amber-50 to-amber-100">
@@ -952,23 +944,27 @@ export default function AnalyticsPage() {
               <CardTitle>GMs Category Distribution</CardTitle>
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={300}>
-                <RechartsPieChart>
-                  <Pie
-                    data={gmsCategoryData}
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={100}
-                    dataKey="value"
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                  >
-                    {gmsCategoryData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={`hsl(${index * 60 + 30}, 70%, 60%)`} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                </RechartsPieChart>
-              </ResponsiveContainer>
+              {gmsCategoryData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={300}>
+                  <RechartsPieChart>
+                    <Pie
+                      data={gmsCategoryData}
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={100}
+                      dataKey="value"
+                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    >
+                      {gmsCategoryData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={`hsl(${index * 60 + 30}, 70%, 60%)`} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </RechartsPieChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="text-gray-500 text-center py-8">No category data available</p>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -1015,7 +1011,9 @@ export default function AnalyticsPage() {
                       cy="50%"
                       outerRadius={100}
                       dataKey="value"
-                      label={({ name, value }) => `${name}: $${value.toLocaleString()}`}
+                      label={({ name, value }) =>
+                        `${name}: $${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                      }
                     >
                       <Cell fill="#0099b5" />
                       <Cell fill="#8b5cf6" />

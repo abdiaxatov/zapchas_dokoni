@@ -1,5 +1,5 @@
-@import 'tailwindcss';
-@import 'tw-animate-css';
+@import "tailwindcss";
+@import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -121,5 +121,34 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+/* Thermal printer receipt styles for XP 90 */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  .receipt-container,
+  .receipt-container * {
+    visibility: visible;
+  }
+
+  .receipt-container {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 80mm;
+    padding: 5mm;
+    background: white;
+    color: black;
+  }
+
+  /* Hide dialog overlay and buttons when printing */
+  [role="dialog"],
+  button {
+    border: none !important;
+    box-shadow: none !important;
   }
 }

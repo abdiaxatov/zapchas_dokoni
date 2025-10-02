@@ -31,6 +31,50 @@ export interface Product {
   isStatic?: boolean // Flag to identify static data
 }
 
+export interface SaleTransaction {
+  id?: string
+  items: Array<{
+    productId: string
+    productName: string
+    productCode: string
+    company: string
+    quantity: number
+    price: number
+    total: number
+  }>
+  totalAmount: number
+  receiptNumber: string
+  saleDate: Timestamp
+  createdAt?: Timestamp
+  isLoan?: boolean // Whether this is a loan transaction
+  loanStatus?: "pending" | "partial" | "paid" // Loan payment status
+  amountPaid?: number // Amount paid so far
+  amountRemaining?: number // Amount still owed
+}
+
+export interface LoanRecord {
+  id?: string
+  customerName: string
+  customerPhone?: string
+  customerAddress?: string
+  transactionId: string // Reference to SaleTransaction
+  receiptNumber: string
+  totalAmount: number
+  amountPaid: number
+  amountRemaining: number
+  loanDate: Timestamp
+  dueDate?: Timestamp
+  status: "pending" | "partial" | "paid"
+  paymentHistory: Array<{
+    amount: number
+    date: Timestamp
+    note?: string
+  }>
+  notes?: string
+  createdAt?: Timestamp
+  updatedAt?: Timestamp
+}
+
 const removeUndefinedFields = <T extends Record<string, any>>(obj: T): Partial<T> => {
   const cleaned: any = {}
   for (const key in obj) {
@@ -42,6 +86,8 @@ const removeUndefinedFields = <T extends Record<string, any>>(obj: T): Partial<T
 }
 
 const COLLECTION_NAME = "products"
+const SALES_COLLECTION_NAME = "saleTransactions"
+const LOANS_COLLECTION_NAME = "loans"
 
 const loadStaticProducts = async (): Promise<Product[]> => {
   try {
@@ -484,6 +530,148 @@ export const deleteAllProducts = async (): Promise<void> => {
     await Promise.all(staticDeletePromises)
   } catch (error) {
     console.error("Error deleting all products:", error)
+    throw error
+  }
+}
+
+export const saveSaleTransaction = async (transaction: Omit<SaleTransaction, "id" | "createdAt">): Promise<string> => {
+  try {
+    const cleanedTransaction = removeUndefinedFields({
+      ...transaction,
+      createdAt: Timestamp.now(),
+    })
+
+    const docRef = await addDoc(collection(db, SALES_COLLECTION_NAME), cleanedTransaction)
+    return docRef.id
+  } catch (error) {
+    console.error("Error saving sale transaction:", error)
+    throw error
+  }
+}
+
+export const getSaleTransactions = async (): Promise<SaleTransaction[]> => {
+  try {
+    const q = query(collection(db, SALES_COLLECTION_NAME), orderBy("saleDate", "desc"))
+    const querySnapshot = await getDocs(q)
+    return querySnapshot.docs.map(
+      (doc) =>
+        ({
+          id: doc.id,
+          ...doc.data(),
+        }) as SaleTransaction,
+    )
+  } catch (error) {
+    console.error("Error getting sale transactions:", error)
+    throw error
+  }
+}
+
+export const createLoan = async (loan: Omit<LoanRecord, "id" | "createdAt" | "updatedAt">): Promise<string> => {
+  try {
+    const cleanedLoan = removeUndefinedFields({
+      ...loan,
+      createdAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+    })
+
+    const docRef = await addDoc(collection(db, LOANS_COLLECTION_NAME), cleanedLoan)
+    return docRef.id
+  } catch (error) {
+    console.error("Error creating loan:", error)
+    throw error
+  }
+}
+
+export const getLoans = async (): Promise<LoanRecord[]> => {
+  try {
+    const q = query(collection(db, LOANS_COLLECTION_NAME), orderBy("loanDate", "desc"))
+    const querySnapshot = await getDocs(q)
+    return querySnapshot.docs.map(
+      (doc) =>
+        ({
+          id: doc.id,
+          ...doc.data(),
+        }) as LoanRecord,
+    )
+  } catch (error) {
+    console.error("Error getting loans:", error)
+    throw error
+  }
+}
+
+export const updateLoan = async (id: string, updates: Partial<LoanRecord>): Promise<void> => {
+  try {
+    const docRef = doc(db, LOANS_COLLECTION_NAME, id)
+    const cleanedUpdates = removeUndefinedFields({
+      ...updates,
+      updatedAt: Timestamp.now(),
+    })
+    await updateDoc(docRef, cleanedUpdates)
+  } catch (error) {
+    console.error("Error updating loan:", error)
+    throw error
+  }
+}
+
+export const addLoanPayment = async (loanId: string, amount: number, note?: string): Promise<void> => {
+  try {
+    const loans = await getLoans()
+    const loan = loans.find((l) => l.id === loanId)
+
+    if (!loan) {
+      throw new Error("Loan not found")
+    }
+
+    const newAmountPaid = (loan.amountPaid || 0) + amount
+    const newAmountRemaining = loan.totalAmount - newAmountPaid
+    const newStatus = newAmountRemaining <= 0 ? "paid" : newAmountPaid > 0 ? "partial" : "pending"
+
+    const paymentEntry = {
+      amount,
+      date: Timestamp.now(),
+      note,
+    }
+
+    const updatedPaymentHistory = [...(loan.paymentHistory || []), paymentEntry]
+
+    await updateLoan(loanId, {
+      amountPaid: newAmountPaid,
+      amountRemaining: Math.max(0, newAmountRemaining),
+      status: newStatus,
+      paymentHistory: updatedPaymentHistory,
+    })
+
+    // Also update the related sale transaction if exists
+    if (loan.transactionId) {
+      const docRef = doc(db, SALES_COLLECTION_NAME, loan.transactionId)
+      await updateDoc(docRef, {
+        loanStatus: newStatus,
+        amountPaid: newAmountPaid,
+        amountRemaining: Math.max(0, newAmountRemaining),
+      })
+    }
+  } catch (error) {
+    console.error("Error adding loan payment:", error)
+    throw error
+  }
+}
+
+export const getPendingLoans = async (): Promise<LoanRecord[]> => {
+  try {
+    const loans = await getLoans()
+    return loans.filter((loan) => loan.status === "pending" || loan.status === "partial")
+  } catch (error) {
+    console.error("Error getting pending loans:", error)
+    throw error
+  }
+}
+
+export const getTotalLoanAmount = async (): Promise<number> => {
+  try {
+    const loans = await getLoans()
+    return loans.reduce((total, loan) => total + (loan.amountRemaining || 0), 0)
+  } catch (error) {
+    console.error("Error calculating total loan amount:", error)
     throw error
   }
 }
