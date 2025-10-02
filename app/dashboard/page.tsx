@@ -248,7 +248,7 @@ export default function AnalyticsPage() {
 
   const comparisonData = [
     {
-      category: "Products",
+      category: "hyundai & kia",
       items: productsAnalytics.totalItems,
       sales: productsAnalytics.totalSales,
       revenue: productsAnalytics.totalRevenue,
@@ -272,7 +272,7 @@ export default function AnalyticsPage() {
       },
       {} as Record<string, number>,
     ),
-  ).map(([name, value]) => ({ name, value, type: "Products" }))
+  ).map(([name, value]) => ({ name, value, type: "hyundai & kia" }))
 
   const gmsCategoryData = Object.entries(
     gmsData.reduce(
@@ -287,12 +287,12 @@ export default function AnalyticsPage() {
 
   const combinedStockAnalytics = [
     {
-      name: "Products In Stock",
+      name: "hyundai & kia In Stock",
       value: productsData.filter((p) => (p.stock || 0) > (p.minStock || 5)).length,
       color: "#10b981",
     },
-    { name: "Products Low Stock", value: productsAnalytics.lowStockItems, color: "#f59e0b" },
-    { name: "Products Out of Stock", value: productsAnalytics.outOfStockItems, color: "#ef4444" },
+    { name: "hyundai & kia Low Stock", value: productsAnalytics.lowStockItems, color: "#f59e0b" },
+    { name: "hyundai & kia Out of Stock", value: productsAnalytics.outOfStockItems, color: "#ef4444" },
     {
       name: "GMs In Stock",
       value: gmsData.filter((g) => (g.stock || 0) > (g.minStock || 5)).length,
@@ -311,7 +311,7 @@ export default function AnalyticsPage() {
       company: product.kompaniya || "Unknown",
       sold: product.sold || 0,
       revenue: (product.sold || 0) * parsePrice(product.narxi),
-      type: "Product",
+      type: "hyundai & kia",
     }))
 
   const bestSellingGMs = filteredGMs
@@ -338,7 +338,7 @@ export default function AnalyticsPage() {
 
     // Overview sheet
     const overviewData = [
-      ["Metric", "Products", "GMs", "Combined"],
+      ["Metric", "hyundai & kia", "GMs", "Combined"],
       ["Total Items", productsAnalytics.totalItems, gmsAnalytics.totalItems, combinedAnalytics.totalItems],
       ["Total Sales", productsAnalytics.totalSales, gmsAnalytics.totalSales, combinedAnalytics.totalSales],
       [
@@ -384,7 +384,7 @@ export default function AnalyticsPage() {
       Status: p.status || "",
     }))
     const wsProducts = XLSX.utils.json_to_sheet(productsExportData)
-    XLSX.utils.book_append_sheet(wb, wsProducts, "Products")
+    XLSX.utils.book_append_sheet(wb, wsProducts, "hyundai & kia")
 
     // GMs sheet
     const gmsExportData = filteredGMs.map((g) => ({
@@ -472,7 +472,7 @@ export default function AnalyticsPage() {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
         <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-grid">
           <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="products">Products</TabsTrigger>
+          <TabsTrigger value="products">hyundai & kia</TabsTrigger>
           <TabsTrigger value="gms">GMs</TabsTrigger>
           <TabsTrigger value="comparison">Comparison</TabsTrigger>
         </TabsList>
@@ -617,14 +617,14 @@ export default function AnalyticsPage() {
                     <XAxis dataKey="date" />
                     <YAxis />
                     <Tooltip />
-                    <Bar dataKey="products" fill="#0099b5" name="Products Sales" />
+                    <Bar dataKey="products" fill="#0099b5" name="hyundai & kia Sales" />
                     <Bar dataKey="gms" fill="#8b5cf6" name="GMs Sales" />
                     <Line
                       type="monotone"
                       dataKey="productsRevenue"
                       stroke="#10b981"
                       strokeWidth={2}
-                      name="Products Revenue"
+                      name="hyundai & kia Revenue"
                     />
                     <Line type="monotone" dataKey="gmsRevenue" stroke="#f59e0b" strokeWidth={2} name="GMs Revenue" />
                   </ComposedChart>
@@ -767,12 +767,12 @@ export default function AnalyticsPage() {
                 <Star className="h-5 w-5 text-[#0099b5]" />
                 Top Selling Items
               </CardTitle>
-              <CardDescription>Best performing products and GMs</CardDescription>
+              <CardDescription>Best performing hyundai & kia and GMs</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <h3 className="font-semibold text-lg mb-4 text-[#0099b5]">Top Products</h3>
+                  <h3 className="font-semibold text-lg mb-4 text-[#0099b5]">Top hyundai & kia</h3>
                   <div className="space-y-3">
                     {bestSellingProducts.length > 0 ? (
                       bestSellingProducts.map((product) => (
@@ -845,7 +845,7 @@ export default function AnalyticsPage() {
             <Card className="border-0 shadow-lg bg-gradient-to-br from-blue-50 to-blue-100">
               <CardContent className="p-4 text-center">
                 <Package className="h-6 w-6 text-blue-500 mx-auto mb-2" />
-                <p className="text-sm font-medium text-blue-700">Total Products</p>
+                <p className="text-sm font-medium text-blue-700">Total hyundai & kia</p>
                 <p className="text-2xl font-bold text-blue-900">{productsAnalytics.totalItems}</p>
               </CardContent>
             </Card>
@@ -876,7 +876,7 @@ export default function AnalyticsPage() {
 
           <Card className="border-0 shadow-lg">
             <CardHeader>
-              <CardTitle>Products Category Distribution</CardTitle>
+              <CardTitle>hyundai & kia Category Distribution</CardTitle>
             </CardHeader>
             <CardContent>
               {productsCategoryData.length > 0 ? (
@@ -975,7 +975,7 @@ export default function AnalyticsPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <BarChart3 className="h-5 w-5 text-[#0099b5]" />
-                Products vs GMs Comparison
+                hyundai & kia vs GMs Comparison
               </CardTitle>
               <CardDescription>Direct comparison of key metrics</CardDescription>
             </CardHeader>
@@ -1004,7 +1004,7 @@ export default function AnalyticsPage() {
                   <RechartsPieChart>
                     <Pie
                       data={[
-                        { name: "Products", value: productsAnalytics.totalRevenue },
+                        { name: "hyundai & kia", value: productsAnalytics.totalRevenue },
                         { name: "GMs", value: gmsAnalytics.totalRevenue },
                       ]}
                       cx="50%"
@@ -1033,7 +1033,7 @@ export default function AnalyticsPage() {
                   <BarChart
                     data={[
                       {
-                        name: "Products",
+                        name: "hyundai & kia",
                         inStock: productsData.filter((p) => (p.stock || 0) > (p.minStock || 5)).length,
                         lowStock: productsAnalytics.lowStockItems,
                         outOfStock: productsAnalytics.outOfStockItems,
