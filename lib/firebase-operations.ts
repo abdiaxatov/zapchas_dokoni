@@ -87,7 +87,7 @@ const removeUndefinedFields = <T extends Record<string, any>>(obj: T): Partial<T
 
 const COLLECTION_NAME = "products"
 const SALES_COLLECTION_NAME = "saleTransactions"
-const LOANS_COLLECTION_NAME = "loans"
+const LOANS_COLLECTION_NAME = "loans1"
 
 const loadStaticProducts = async (): Promise<Product[]> => {
   try {

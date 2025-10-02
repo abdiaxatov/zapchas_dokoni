@@ -1,56 +1,106 @@
 import { collection, addDoc, updateDoc, doc, getDocs, query, orderBy, Timestamp } from "firebase/firestore"
 import { db } from "./firebase"
-import staticGMData from "@/data/gm-data.json"
+import staticGMsData from "@/data/gm-data.json"
 
 export interface GM {
   id?: string
-  kodi: string | number // Kod - Product code
-  tovar?: string // Tovar - Product name (alternative to nomi)
-  nomi?: string // Nomi - Product name (keeping for backward compatibility)
-  olchBirligi?: string // O'lch. birligi - Unit of measurement (KOMP, DONA, KG, etc.)
-  narxi: string | number // Narx - Price
-  model?: string // Optional - Model
-  kompaniya?: string // Optional - Company
+  kodi: string
+  model: string
+  nomi: string
+  kompaniya: string
+  narxi: string
   sold?: number
-  stock?: number
-  minStock?: number
-  maxStock?: number
-  location?: string
-  category?: string
-  supplier?: string
-  cost?: string | number
-  profit?: number
-  barcode?: string
-  weight?: number
-  dimensions?: string
-  description?: string
-  status?: "active" | "inactive" | "discontinued"
-  lastSold?: Timestamp
-  lastRestocked?: Timestamp
+  stock?: number // Current stock quantity
+  minStock?: number // Minimum stock alert level
+  maxStock?: number // Maximum stock capacity
+  location?: string // Warehouse location
+  category?: string // GM category
+  supplier?: string // Supplier information
+  cost?: string // Cost price
+  profit?: number // Profit margin
+  barcode?: string // Barcode
+  weight?: number // Weight in kg
+  dimensions?: string // Dimensions (LxWxH)
+  description?: string // GM description
+  status?: "active" | "inactive" | "discontinued" // GM status
+  lastSold?: Timestamp // Last sale date
+  lastRestocked?: Timestamp // Last restock date
   createdAt?: Timestamp
   updatedAt?: Timestamp
-  isDeleted?: boolean
-  isStatic?: boolean
+  isDeleted?: boolean // Soft delete flag
+  isStatic?: boolean // Flag to identify static data
+}
+
+export interface SaleGM {
+  id?: string
+  items: Array<{
+    GMId: string
+    GMName: string
+    GMCode: string
+    company: string
+    quantity: number
+    price: number
+    total: number
+  }>
+  totalAmount: number
+  receiptNumber: string
+  saleDate: Timestamp
+  createdAt?: Timestamp
+  isLoan?: boolean // Whether this is a loan transaction
+  loanStatus?: "pending" | "partial" | "paid" // Loan payment status
+  amountPaid?: number // Amount paid so far
+  amountRemaining?: number // Amount still owed
+}
+
+export interface LoanRecord {
+  id?: string
+  customerName: string
+  customerPhone?: string
+  customerAddress?: string
+  transactionId: string // Reference to SaleGM
+  receiptNumber: string
+  totalAmount: number
+  amountPaid: number
+  amountRemaining: number
+  loanDate: Timestamp
+  dueDate?: Timestamp
+  status: "pending" | "partial" | "paid"
+  paymentHistory: Array<{
+    amount: number
+    date: Timestamp
+    note?: string
+  }>
+  notes?: string
+  createdAt?: Timestamp
+  updatedAt?: Timestamp
+}
+
+const removeUndefinedFields = <T extends Record<string, any>>(obj: T): Partial<T> => {
+  const cleaned: any = {}
+  for (const key in obj) {
+    if (obj[key] !== undefined) {
+      cleaned[key] = obj[key]
+    }
+  }
+  return cleaned
 }
 
 const COLLECTION_NAME = "GMs"
+const SALES_COLLECTION_NAME = "SaleGMs"
+const LOANS_COLLECTION_NAME = "loans"
 
 const loadStaticGMs = async (): Promise<GM[]> => {
   try {
-    const staticData = staticGMData
+    const staticData = staticGMsData
 
+    // Transform static data to match GM interface
     return staticData.map((item: any, index: number) => ({
-      id: item.id || `gm-static-${index + 1}`,
-      kodi: item.kodi || item.KODI || item.Kod,
-      tovar: item.tovar || item.Tovar,
-      nomi: item.nomi || item.NOMI || item.tovar || item.Tovar,
-      olchBirligi: item.olchBirligi || item["O'lch. birligi"] || item.unit,
+      id: item.id || `static-${index + 1}`, // Use existing ID or generate one
+      kodi: item.kodi || item.KODI,
       model: item.model || item.MODEL || "",
-      kompaniya: item.kompaniya || item.KOMPANIYA || "",
-      narxi:
-        typeof item.narxi === "number"
-          ? item.narxi.toString()
-          : item.narxi || item.NARXI || item.Narx?.toString() || "0",
+      nomi: item.nomi || item.NOMI,
+      kompaniya: item.kompaniya || item.KOMPANIYA,
+      narxi: typeof item.narxi === "number" ? item.narxi.toString() : item.narxi || item.NARXI,
       sold: item.sold || 0,
       stock: item.stock || 0,
       minStock: item.minStock || 10,
@@ -109,7 +159,9 @@ export const getGMs = async (): Promise<GM[]> => {
     })
 
     // Filter static GMs: exclude deleted ones and ones that exist in Firebase
-    const activeStaticGMs = staticGMs.filter((p) => !deletedStaticIds.has(p.id || "") && !firebaseMap.has(p.id || ""))
+    const activeStaticGMs = staticGMs.filter(
+      (p) => !deletedStaticIds.has(p.id || "") && !firebaseMap.has(p.id || ""),
+    )
 
     // Merge: Firebase GMs first (including modified static ones), then unmodified static
     return [...Array.from(firebaseMap.values()), ...activeStaticGMs]
@@ -122,9 +174,8 @@ export const getGMs = async (): Promise<GM[]> => {
 // Add new GM
 export const addGM = async (GM: Omit<GM, "id" | "createdAt" | "updatedAt">): Promise<string> => {
   try {
-    const docRef = await addDoc(collection(db, COLLECTION_NAME), {
+    const cleanedGM = removeUndefinedFields({
       ...GM,
-      nomi: GM.nomi || GM.tovar || "",
       sold: GM.sold || 0,
       stock: GM.stock || 0,
       minStock: GM.minStock || 10,
@@ -135,6 +186,8 @@ export const addGM = async (GM: Omit<GM, "id" | "createdAt" | "updatedAt">): Pro
       createdAt: Timestamp.now(),
       updatedAt: Timestamp.now(),
     })
+
+    const docRef = await addDoc(collection(db, COLLECTION_NAME), cleanedGM)
     return docRef.id
   } catch (error) {
     console.error("Error adding GM:", error)
@@ -144,12 +197,10 @@ export const addGM = async (GM: Omit<GM, "id" | "createdAt" | "updatedAt">): Pro
 
 export const updateGM = async (id: string, updates: Partial<GM>): Promise<void> => {
   try {
-    // Check if this is a static GM
     const GMs = await getGMs()
     const GM = GMs.find((p) => p.id === id)
 
     if (GM?.isStatic) {
-      // For static GMs, check if Firebase entry already exists
       const q = query(collection(db, COLLECTION_NAME))
       const querySnapshot = await getDocs(q)
       const existingFirebaseGM = querySnapshot.docs.find(
@@ -157,31 +208,31 @@ export const updateGM = async (id: string, updates: Partial<GM>): Promise<void> 
       )
 
       if (existingFirebaseGM) {
-        // Update existing Firebase entry
         const docRef = doc(db, COLLECTION_NAME, existingFirebaseGM.id)
-        await updateDoc(docRef, {
+        const cleanedUpdates = removeUndefinedFields({
           ...updates,
           updatedAt: Timestamp.now(),
         })
+        await updateDoc(docRef, cleanedUpdates)
       } else {
-        // Create new Firebase entry with updated data
-        await addDoc(collection(db, COLLECTION_NAME), {
+        const cleanedGM = removeUndefinedFields({
           ...GM,
           ...updates,
-          id: id, // Keep original static ID
+          id: id,
           isStatic: true,
           isDeleted: false,
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now(),
         })
+        await addDoc(collection(db, COLLECTION_NAME), cleanedGM)
       }
     } else {
-      // Regular Firebase GM
       const docRef = doc(db, COLLECTION_NAME, id)
-      await updateDoc(docRef, {
+      const cleanedUpdates = removeUndefinedFields({
         ...updates,
         updatedAt: Timestamp.now(),
       })
+      await updateDoc(docRef, cleanedUpdates)
     }
   } catch (error) {
     console.error("Error updating GM:", error)
@@ -191,18 +242,15 @@ export const updateGM = async (id: string, updates: Partial<GM>): Promise<void> 
 
 export const deleteGM = async (id: string): Promise<void> => {
   try {
-    // Check if this is a static GM
     const GMs = await getGMs()
     const GM = GMs.find((p) => p.id === id)
 
     if (GM?.isStatic) {
-      // Check if Firebase entry already exists
       const q = query(collection(db, COLLECTION_NAME))
       const querySnapshot = await getDocs(q)
       const existingFirebaseGM = querySnapshot.docs.find((doc) => doc.data().id === id && doc.data().isStatic)
 
       if (existingFirebaseGM) {
-        // Update existing Firebase entry to mark as deleted
         const docRef = doc(db, COLLECTION_NAME, existingFirebaseGM.id)
         await updateDoc(docRef, {
           isDeleted: true,
@@ -210,9 +258,8 @@ export const deleteGM = async (id: string): Promise<void> => {
           updatedAt: Timestamp.now(),
         })
       } else {
-        // Create new Firebase entry marking it as deleted
         await addDoc(collection(db, COLLECTION_NAME), {
-          id: id, // Keep the original static ID
+          id: id,
           isDeleted: true,
           isStatic: true,
           deletedAt: Timestamp.now(),
@@ -221,7 +268,6 @@ export const deleteGM = async (id: string): Promise<void> => {
         })
       }
     } else {
-      // For Firebase GMs, mark as deleted
       const docRef = doc(db, COLLECTION_NAME, id)
       await updateDoc(docRef, {
         isDeleted: true,
@@ -235,20 +281,17 @@ export const deleteGM = async (id: string): Promise<void> => {
   }
 }
 
-// Sell GM (increment sold count)
 export const sellGM = async (id: string, quantity: number): Promise<void> => {
   try {
     const GMs = await getGMs()
     const GM = GMs.find((p) => p.id === id)
     if (GM) {
       if (GM.isStatic) {
-        // Check if this static GM already has a Firebase entry
         const q = query(collection(db, COLLECTION_NAME))
         const querySnapshot = await getDocs(q)
         const existingFirebaseGM = querySnapshot.docs.find((doc) => doc.data().id === id && doc.data().isStatic)
 
         if (existingFirebaseGM) {
-          // Update existing Firebase entry
           const docRef = doc(db, COLLECTION_NAME, existingFirebaseGM.id)
           const data = existingFirebaseGM.data()
           const newStock = Math.max(0, (data.stock || 0) - quantity)
@@ -259,10 +302,9 @@ export const sellGM = async (id: string, quantity: number): Promise<void> => {
             updatedAt: Timestamp.now(),
           })
         } else {
-          // Create new Firebase entry for static GM
-          await addDoc(collection(db, COLLECTION_NAME), {
+          const cleanedGM = removeUndefinedFields({
             ...GM,
-            id: id, // Keep original static ID
+            id: id,
             sold: quantity,
             stock: Math.max(0, (GM.stock || 0) - quantity),
             isStatic: true,
@@ -271,9 +313,9 @@ export const sellGM = async (id: string, quantity: number): Promise<void> => {
             createdAt: Timestamp.now(),
             updatedAt: Timestamp.now(),
           })
+          await addDoc(collection(db, COLLECTION_NAME), cleanedGM)
         }
       } else {
-        // Regular Firebase GM
         const docRef = doc(db, COLLECTION_NAME, id)
         const newStock = Math.max(0, (GM.stock || 0) - quantity)
         await updateDoc(docRef, {
@@ -286,40 +328,6 @@ export const sellGM = async (id: string, quantity: number): Promise<void> => {
     }
   } catch (error) {
     console.error("Error selling GM:", error)
-    throw error
-  }
-}
-
-export const deleteAllGMs = async (): Promise<void> => {
-  try {
-    const q = query(collection(db, COLLECTION_NAME))
-    const querySnapshot = await getDocs(q)
-
-    // Mark all documents as deleted
-    const deletePromises = querySnapshot.docs.map((docSnapshot) => {
-      return updateDoc(docSnapshot.ref, {
-        isDeleted: true,
-        deletedAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-      })
-    })
-    await Promise.all(deletePromises)
-
-    // Also mark all static GMs as deleted
-    const staticGMs = await loadStaticGMs()
-    const staticDeletePromises = staticGMs.map((GM) => {
-      return addDoc(collection(db, COLLECTION_NAME), {
-        id: GM.id,
-        isDeleted: true,
-        isStatic: true,
-        deletedAt: Timestamp.now(),
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-      })
-    })
-    await Promise.all(staticDeletePromises)
-  } catch (error) {
-    console.error("Error deleting all GMs:", error)
     throw error
   }
 }
@@ -343,7 +351,7 @@ export const addStock = async (id: string, quantity: number): Promise<void> => {
             updatedAt: Timestamp.now(),
           })
         } else {
-          await addDoc(collection(db, COLLECTION_NAME), {
+          const cleanedGM = removeUndefinedFields({
             ...GM,
             id: id,
             stock: (GM.stock || 0) + quantity,
@@ -353,6 +361,7 @@ export const addStock = async (id: string, quantity: number): Promise<void> => {
             createdAt: Timestamp.now(),
             updatedAt: Timestamp.now(),
           })
+          await addDoc(collection(db, COLLECTION_NAME), cleanedGM)
         }
       } else {
         const docRef = doc(db, COLLECTION_NAME, id)
@@ -388,7 +397,7 @@ export const removeStock = async (id: string, quantity: number): Promise<void> =
             updatedAt: Timestamp.now(),
           })
         } else {
-          await addDoc(collection(db, COLLECTION_NAME), {
+          const cleanedGM = removeUndefinedFields({
             ...GM,
             id: id,
             stock: newStock,
@@ -397,6 +406,7 @@ export const removeStock = async (id: string, quantity: number): Promise<void> =
             createdAt: Timestamp.now(),
             updatedAt: Timestamp.now(),
           })
+          await addDoc(collection(db, COLLECTION_NAME), cleanedGM)
         }
       } else {
         const docRef = doc(db, COLLECTION_NAME, id)
@@ -430,7 +440,7 @@ export const bulkUpdateStock = async (updates: { id: string; stock: number }[]):
             updatedAt: Timestamp.now(),
           })
         } else {
-          return addDoc(collection(db, COLLECTION_NAME), {
+          const cleanedGM = removeUndefinedFields({
             ...GM,
             id: id,
             stock,
@@ -439,6 +449,7 @@ export const bulkUpdateStock = async (updates: { id: string; stock: number }[]):
             createdAt: Timestamp.now(),
             updatedAt: Timestamp.now(),
           })
+          return addDoc(collection(db, COLLECTION_NAME), cleanedGM)
         }
       } else {
         const docRef = doc(db, COLLECTION_NAME, id)
@@ -479,12 +490,188 @@ export const getInventoryValue = async (): Promise<number> => {
   try {
     const GMs = await getGMs()
     return GMs.reduce((total, GM) => {
-      const price = Number.parseFloat(GM.narxi.toString().replace(/[^\d.]/g, "")) || 0
+      const price = Number.parseFloat(GM.narxi.replace(/[^\d.]/g, "")) || 0
       const stock = GM.stock || 0
       return total + price * stock
     }, 0)
   } catch (error) {
     console.error("Error calculating inventory value:", error)
+    throw error
+  }
+}
+
+export const deleteAllGMs = async (): Promise<void> => {
+  try {
+    const q = query(collection(db, COLLECTION_NAME))
+    const querySnapshot = await getDocs(q)
+
+    // Mark all documents as deleted
+    const deletePromises = querySnapshot.docs.map((docSnapshot) => {
+      return updateDoc(docSnapshot.ref, {
+        isDeleted: true,
+        deletedAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      })
+    })
+    await Promise.all(deletePromises)
+
+    // Also mark all static GMs as deleted
+    const staticGMs = await loadStaticGMs()
+    const staticDeletePromises = staticGMs.map((GM) => {
+      return addDoc(collection(db, COLLECTION_NAME), {
+        id: GM.id,
+        isDeleted: true,
+        isStatic: true,
+        deletedAt: Timestamp.now(),
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      })
+    })
+    await Promise.all(staticDeletePromises)
+  } catch (error) {
+    console.error("Error deleting all GMs:", error)
+    throw error
+  }
+}
+
+export const saveSaleGM = async (transaction: Omit<SaleGM, "id" | "createdAt">): Promise<string> => {
+  try {
+    const cleanedTransaction = removeUndefinedFields({
+      ...transaction,
+      createdAt: Timestamp.now(),
+    })
+
+    const docRef = await addDoc(collection(db, SALES_COLLECTION_NAME), cleanedTransaction)
+    return docRef.id
+  } catch (error) {
+    console.error("Error saving sale transaction:", error)
+    throw error
+  }
+}
+
+export const getSaleGMs = async (): Promise<SaleGM[]> => {
+  try {
+    const q = query(collection(db, SALES_COLLECTION_NAME), orderBy("saleDate", "desc"))
+    const querySnapshot = await getDocs(q)
+    return querySnapshot.docs.map(
+      (doc) =>
+        ({
+          id: doc.id,
+          ...doc.data(),
+        }) as SaleGM,
+    )
+  } catch (error) {
+    console.error("Error getting sale transactions:", error)
+    throw error
+  }
+}
+
+export const createLoan = async (loan: Omit<LoanRecord, "id" | "createdAt" | "updatedAt">): Promise<string> => {
+  try {
+    const cleanedLoan = removeUndefinedFields({
+      ...loan,
+      createdAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+    })
+
+    const docRef = await addDoc(collection(db, LOANS_COLLECTION_NAME), cleanedLoan)
+    return docRef.id
+  } catch (error) {
+    console.error("Error creating loan:", error)
+    throw error
+  }
+}
+
+export const getLoans = async (): Promise<LoanRecord[]> => {
+  try {
+    const q = query(collection(db, LOANS_COLLECTION_NAME), orderBy("loanDate", "desc"))
+    const querySnapshot = await getDocs(q)
+    return querySnapshot.docs.map(
+      (doc) =>
+        ({
+          id: doc.id,
+          ...doc.data(),
+        }) as LoanRecord,
+    )
+  } catch (error) {
+    console.error("Error getting loans:", error)
+    throw error
+  }
+}
+
+export const updateLoan = async (id: string, updates: Partial<LoanRecord>): Promise<void> => {
+  try {
+    const docRef = doc(db, LOANS_COLLECTION_NAME, id)
+    const cleanedUpdates = removeUndefinedFields({
+      ...updates,
+      updatedAt: Timestamp.now(),
+    })
+    await updateDoc(docRef, cleanedUpdates)
+  } catch (error) {
+    console.error("Error updating loan:", error)
+    throw error
+  }
+}
+
+export const addLoanPayment = async (loanId: string, amount: number, note?: string): Promise<void> => {
+  try {
+    const loans = await getLoans()
+    const loan = loans.find((l) => l.id === loanId)
+
+    if (!loan) {
+      throw new Error("Loan not found")
+    }
+
+    const newAmountPaid = (loan.amountPaid || 0) + amount
+    const newAmountRemaining = loan.totalAmount - newAmountPaid
+    const newStatus = newAmountRemaining <= 0 ? "paid" : newAmountPaid > 0 ? "partial" : "pending"
+
+    const paymentEntry = {
+      amount,
+      date: Timestamp.now(),
+      note,
+    }
+
+    const updatedPaymentHistory = [...(loan.paymentHistory || []), paymentEntry]
+
+    await updateLoan(loanId, {
+      amountPaid: newAmountPaid,
+      amountRemaining: Math.max(0, newAmountRemaining),
+      status: newStatus,
+      paymentHistory: updatedPaymentHistory,
+    })
+
+    // Also update the related sale transaction if exists
+    if (loan.transactionId) {
+      const docRef = doc(db, SALES_COLLECTION_NAME, loan.transactionId)
+      await updateDoc(docRef, {
+        loanStatus: newStatus,
+        amountPaid: newAmountPaid,
+        amountRemaining: Math.max(0, newAmountRemaining),
+      })
+    }
+  } catch (error) {
+    console.error("Error adding loan payment:", error)
+    throw error
+  }
+}
+
+export const getPendingLoans = async (): Promise<LoanRecord[]> => {
+  try {
+    const loans = await getLoans()
+    return loans.filter((loan) => loan.status === "pending" || loan.status === "partial")
+  } catch (error) {
+    console.error("Error getting pending loans:", error)
+    throw error
+  }
+}
+
+export const getTotalLoanAmount = async (): Promise<number> => {
+  try {
+    const loans = await getLoans()
+    return loans.reduce((total, loan) => total + (loan.amountRemaining || 0), 0)
+  } catch (error) {
+    console.error("Error calculating total loan amount:", error)
     throw error
   }
 }

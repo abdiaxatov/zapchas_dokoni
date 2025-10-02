@@ -52,6 +52,13 @@ import {
   Settings,
   Hash,
   Tag,
+  Printer,
+  Receipt,
+  HandCoins,
+  Wallet,
+  CreditCard,
+  Users,
+  MapPin,
 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
@@ -67,9 +74,18 @@ import {
   getLowStockGMs,
   getInventoryValue,
   type GM,
+  getSaleGMs,
+  saveSaleGM,
+  type SaleGM,
+  getLoans,
+  createLoan,
+  addLoanPayment,
+  getPendingLoans,
+  getTotalLoanAmount,
+  type LoanRecord,
 } from "@/lib/firebase-gm-operations"
 import * as XLSX from "xlsx"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs" // Added for tabs
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   BarChart,
   Bar,
@@ -83,13 +99,15 @@ import {
   Cell,
   LineChart,
   Line,
-} from "recharts" // Added for charts
-import { DropdownMenuSeparator } from "@/components/ui/dropdown-menu" // Added for dropdown menu
+} from "recharts"
+import { DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Timestamp } from "firebase/firestore"
 
-export default function GMPage() {
+export default function DataPage() {
   const { user, loading } = useAuth()
   const { t } = useLanguage()
-  const { showToast: toast } = useToast() // Renamed to toast for consistency with updates
+  const { showToast } = useToast()
   const router = useRouter()
 
   const [data, setData] = useState<GM[]>([])
@@ -107,10 +125,8 @@ export default function GMPage() {
   const [currentPage, setCurrentPage] = useState(1)
   const [itemsPerPage, setItemsPerPage] = useState(20)
 
-  // Updated state for import functionality
-  const [isImporting, setIsImporting] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
-  const [isUploading, setIsUploading] = useState(false) // Keep for potential file upload progress UI
+  const [isUploading, setIsUploading] = useState(false)
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
@@ -121,7 +137,7 @@ export default function GMPage() {
   const [isStockModalOpen, setIsStockModalOpen] = useState(false)
   const [isLowStockModalOpen, setIsLowStockModalOpen] = useState(false)
   const [deletingGM, setDeletingGM] = useState<GM | null>(null)
-  const [editingGM, setEditingGM] = useState<GM | null>(null) // Renamed from editingRow
+  const [editingRow, setEditingRow] = useState<GM | null>(null)
   const [sellingGM, setSellingGM] = useState<GM | null>(null)
   const [viewingGM, setViewingGM] = useState<GM | null>(null)
   const [stockGM, setStockGM] = useState<GM | null>(null)
@@ -134,11 +150,59 @@ export default function GMPage() {
 
   const [activeTab, setActiveTab] = useState("table")
 
-  // Updated formData to reflect new data structure
+  const [selectedGMs, setSelectedGMs] = useState<Set<string>>(new Set())
+  const [isBulkSellModalOpen, setIsBulkSellModalOpen] = useState(false)
+  const [bulkSellQuantities, setBulkSellQuantities] = useState<Record<string, number>>({})
+  const [showReceipt, setShowReceipt] = useState(false)
+  const [receiptData, setReceiptData] = useState<any>(null)
+  const [saleGMs, setSaleGMs] = useState<SaleGM[]>([])
+  const [salesHistoryFilter, setSalesHistoryFilter] = useState<"all" | "today" | "week" | "month">("all")
+
+  const [loans, setLoans] = useState<LoanRecord[]>([])
+  const [pendingLoans, setPendingLoans] = useState<LoanRecord[]>([])
+  const [totalLoanAmount, setTotalLoanAmount] = useState(0)
+  const [isLoanModalOpen, setIsLoanModalOpen] = useState(false)
+  const [isLoanPaymentModalOpen, setIsLoanPaymentModalOpen] = useState(false)
+  const [isLoanDetailsModalOpen, setIsLoanDetailsModalOpen] = useState(false)
+  const [selectedLoan, setSelectedLoan] = useState<LoanRecord | null>(null)
+  const [loanStatusFilter, setLoanStatusFilter] = useState<string>("all")
+  const [loanSearchQuery, setLoanSearchQuery] = useState("")
+  const [salesSearchQuery, setSalesSearchQuery] = useState("")
+  const [isSaleDetailsModalOpen, setIsSaleDetailsModalOpen] = useState(false)
+  const [selectedSale, setSelectedSale] = useState<SaleGM | null>(null)
+  const [sellAsLoan, setSellAsLoan] = useState(false)
+  const [loanCustomerData, setLoanCustomerData] = useState({
+    customerName: "",
+    customerPhone: "",
+    customerAddress: "",
+    dueDate: "",
+    notes: "",
+  })
+  const [loanPaymentData, setLoanPaymentData] = useState({
+    amount: "",
+    note: "",
+  })
+
+  const [isInitialLoading, setIsInitialLoading] = useState(true)
+  const [showImportDialog, setShowImportDialog] = useState(false)
+  const [importFile, setImportFile] = useState<File | null>(null)
+  const [refreshing, setRefreshing] = useState(false) // Added refreshing state
+
+  // Pagination state for loans and sales tabs
+  const [loansPage, setLoansPage] = useState(1)
+  const [loansPerPage, setLoansPerPage] = useState(10)
+  const [salesPage, setSalesPage] = useState(1)
+  const [salesPerPage, setSalesPerPage] = useState(10)
+
+  const [companies, setCompanies] = useState<string[]>([]) // Declared companies state
+  const [categories, setCategories] = useState<string[]>([]) // Declared categories state
+  const [salesTrendData, setSalesTrendData] = useState<Array<{ month: string; sales: number }>>([]) // Declared salesTrendData state
+  const [categoryData, setCategoryData] = useState<Array<{ name: string; value: number }>>([]) // Declared categoryData state
   const [formData, setFormData] = useState({
+    // Declared formData state
     kodi: "",
     model: "",
-    nomi: "", // Kept for backward compatibility/display
+    nomi: "",
     kompaniya: "",
     narxi: "",
     stock: "0",
@@ -152,26 +216,10 @@ export default function GMPage() {
     weight: "",
     dimensions: "",
     description: "",
-    status: "active" as "active" | "inactive" | "discontinued",
-    // New fields for import handling
-    tovar: "",
-    olchBirligi: "",
+    status: "active",
   })
-
-  // Added state for modal visibility and filter options
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false)
-  const [companies, setCompanies] = useState<string[]>([])
-  const [categories, setCategories] = useState<string[]>([])
-  const [salesTrendData, setSalesTrendData] = useState<Array<{ month: string; sales: number }>>([])
-  const [categoryData, setCategoryData] = useState<Array<{ name: string; value: number }>>([])
-
-  // Added refresh state and ref for file input
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const [refreshing, setRefreshing] = useState(false) // Added refreshing state
-
-  const [isInitialLoading, setIsInitialLoading] = useState(true)
-  const [showImportDialog, setShowImportDialog] = useState(false)
-  const [importFile, setImportFile] = useState<File | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null) // Declared fileInputRef
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false) // Declared isAddModalOpen state
 
   useEffect(() => {
     if (!loading && !user) {
@@ -179,12 +227,9 @@ export default function GMPage() {
     }
   }, [user, loading, router])
 
-  // Consolidated data loading
   const loadData = async () => {
-    if (!user) return
-
-    setIsInitialLoading(true)
-    try {
+    if (user) {
+      setIsInitialLoading(true)
       await Promise.all([
         loadGMs(),
         loadLowStockGMs(),
@@ -192,22 +237,49 @@ export default function GMPage() {
         loadCompanyData(),
         loadCategoryData(),
         loadSalesTrend(),
+        loadLoans(),
+        loadPendingLoans(),
+        loadTotalLoanAmount(),
       ])
-    } catch (error) {
-      console.error("Error loading initial data:", error)
-      toast({
-        title: t("common.error"),
-        description: "Failed to load initial data.",
-        variant: "destructive",
-      })
-    } finally {
       setIsInitialLoading(false)
     }
   }
 
+  // Fetch initial data including sale transactions
   useEffect(() => {
-    loadData()
-  }, [user])
+    const fetchData = async () => {
+      if (user) {
+        setIsInitialLoading(true)
+        try {
+          const [GMsData, loansData, transactionsData] = await Promise.all([
+            getGMs(),
+            getLoans(),
+            getSaleGMs(),
+          ])
+          setData(GMsData)
+          setLoans(loansData)
+          setSaleGMs(transactionsData)
+          loadLowStockGMs()
+          loadInventoryValue()
+          loadCompanyData()
+          loadCategoryData()
+          loadSalesTrend()
+          loadPendingLoans()
+          loadTotalLoanAmount()
+        } catch (error) {
+          console.error("Error fetching data:", error)
+          showToast({
+            title: t("common.error"),
+            description: t("common.errorFetchingData"),
+            variant: "destructive",
+          })
+        } finally {
+          setIsInitialLoading(false)
+        }
+      }
+    }
+    fetchData()
+  }, [user, t, showToast])
 
   const loadGMs = async () => {
     try {
@@ -216,7 +288,7 @@ export default function GMPage() {
       setData(GMs)
     } catch (error) {
       console.error("Error loading GMs:", error)
-      toast({
+      showToast({
         title: t("common.error"),
         description: "Failed to load GMs",
         variant: "destructive",
@@ -256,18 +328,20 @@ export default function GMPage() {
   }
 
   // Added function to calculate sales trend data
-  const loadSalesTrend = async () => {
-    // Marked as async for consistency, though not strictly necessary here
+  const loadSalesTrend = () => {
     const monthlySales: { [key: string]: number } = {}
+    // Ensure data is available before iterating
+    if (data.length === 0) {
+      setSalesTrendData([])
+      return
+    }
+
     data.forEach((GM) => {
-      // Assuming sales are recorded over time, this needs a proper date field in GM type
-      // For now, a placeholder or assumption will be made.
-      // Example: if GM had a 'soldDate' property
-      // const month = GM.soldDate ? new Date(GM.soldDate).toLocaleString("default", { month: "short" }) : null;
-      // if (month) {
-      //   monthlySales[month] = (monthlySales[month] || 0) + 1; // Or use a 'quantity sold' field
-      // }
-      const month = new Date().toLocaleString("default", { month: "short" }) // Simplified for example, needs actual date logic
+      // Assuming GM.sold represents sales for that GM.
+      // If sales trend should be based on sale transactions, this needs to be re-evaluated.
+      // For now, assuming it's based on total sold quantity per GM category or similar.
+      // This calculation might need to be based on actual sale transactions for a more accurate trend.
+      const month = new Date().toLocaleString("default", { month: "short" }) // Simplified for example
       monthlySales[month] = (monthlySales[month] || 0) + (GM.sold || 0)
     })
     const trendData = Object.entries(monthlySales).map(([month, sales]) => ({ month, sales }))
@@ -289,26 +363,201 @@ export default function GMPage() {
     calculateCategoryData()
   }, [data])
 
-  const handleCreate = async () => {
-    // Basic validation
-    if (!formData.kodi || !formData.nomi || !formData.kompaniya || !formData.narxi) {
-      toast({
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      const allIds = new Set(paginatedData.map((p) => p.id).filter(Boolean) as string[])
+      setSelectedGMs(allIds)
+      // Initialize quantities for all selected GMs
+      const quantities: Record<string, number> = {}
+      paginatedData.forEach((p) => {
+        if (p.id) quantities[p.id] = 1
+      })
+      setBulkSellQuantities(quantities)
+    } else {
+      setSelectedGMs(new Set())
+      setBulkSellQuantities({})
+    }
+  }
+
+  const handleSelectGM = (GMId: string, checked: boolean) => {
+    const newSelected = new Set(selectedGMs)
+    if (checked) {
+      newSelected.add(GMId)
+      setBulkSellQuantities((prev) => ({ ...prev, [GMId]: 1 }))
+    } else {
+      newSelected.delete(GMId)
+      setBulkSellQuantities((prev) => {
+        const updated = { ...prev }
+        delete updated[GMId]
+        return updated
+      })
+    }
+    setSelectedGMs(newSelected)
+  }
+
+  const handleBulkSell = async () => {
+    try {
+      const selectedGMsList = Array.from(selectedGMs)
+        .map((id) => data.find((p) => p.id === id))
+        .filter((p): p is GM => p !== undefined)
+
+      if (selectedGMsList.length === 0) {
+        showToast({
+          title: t("common.error"),
+          description: "Iltimos, sotish uchun mahsulotlarni tanlang",
+          variant: "destructive",
+        })
+        return
+      }
+
+      // Validate quantities
+      for (const GM of selectedGMsList) {
+        const quantity = bulkSellQuantities[GM.id!] || 0
+        if (quantity <= 0) {
+          showToast({
+            title: t("common.error"),
+            description: `${GM.nomi} uchun miqdor kiriting`,
+            variant: "destructive",
+          })
+          return
+        }
+        if (quantity > (GM.stock || 0)) {
+          showToast({
+            title: t("common.error"),
+            description: `${GM.nomi} uchun yetarli mahsulot yo'q`,
+            variant: "destructive",
+          })
+          return
+        }
+      }
+
+      // If selling as loan, validate customer data
+      if (sellAsLoan) {
+        if (!loanCustomerData.customerName.trim()) {
+          showToast({
+            title: t("common.error"),
+            description: t("loan.customerName") + " kiritilishi shart",
+            variant: "destructive",
+          })
+          return
+        }
+      }
+
+      // Process sales
+      const saleItems = []
+      for (const GM of selectedGMsList) {
+        const quantity = bulkSellQuantities[GM.id!]
+        await sellGM(GM.id!, quantity)
+
+        const price = Number.parseFloat(GM.narxi.replace(/[^\d.]/g, "")) || 0
+        saleItems.push({
+          GMId: GM.id!,
+          GMName: GM.nomi,
+          GMCode: GM.kodi,
+          company: GM.kompaniya,
+          quantity,
+          price,
+          total: price * quantity,
+          location: GM.location, // Add location to sale item
+        })
+      }
+
+      // Create receipt data
+      const totalAmount = saleItems.reduce((sum, item) => sum + item.total, 0)
+      const receiptNumber = `RCP-${Date.now()}`
+
+      const receipt = {
+        receiptNumber,
+        items: saleItems,
+        totalAmount,
+        date: new Date(),
+      }
+
+      // Save transaction
+      const transactionData: Omit<SaleGM, "id" | "createdAt"> = {
+        items: saleItems,
+        totalAmount,
+        receiptNumber,
+        saleDate: Timestamp.now(),
+        isLoan: sellAsLoan,
+        loanStatus: sellAsLoan ? "pending" : undefined,
+        amountPaid: sellAsLoan ? 0 : totalAmount,
+        amountRemaining: sellAsLoan ? totalAmount : 0,
+      }
+
+      const transactionId = await saveSaleGM(transactionData)
+
+      // If loan, create loan record
+      if (sellAsLoan) {
+        await createLoan({
+          customerName: loanCustomerData.customerName,
+          customerPhone: loanCustomerData.customerPhone,
+          customerAddress: loanCustomerData.customerAddress,
+          transactionId,
+          receiptNumber,
+          totalAmount,
+          amountPaid: 0,
+          amountRemaining: totalAmount,
+          loanDate: Timestamp.now(),
+          dueDate: loanCustomerData.dueDate ? Timestamp.fromDate(new Date(loanCustomerData.dueDate)) : undefined,
+          status: "pending",
+          paymentHistory: [],
+          notes: loanCustomerData.notes,
+        })
+
+        showToast({
+          title: t("common.success"),
+          description: t("loan.loanCreated"),
+          variant: "success",
+        })
+      }
+
+      setReceiptData(receipt)
+      setShowReceipt(true)
+      setIsBulkSellModalOpen(false)
+      setSelectedGMs(new Set())
+      setBulkSellQuantities({})
+      setSellAsLoan(false)
+      setLoanCustomerData({
+        customerName: "",
+        customerPhone: "",
+        customerAddress: "",
+        dueDate: "",
+        notes: "",
+      })
+
+      await loadSaleGMs()
+      await loadData()
+
+      showToast({
+        title: t("common.success"),
+        description: `${selectedGMsList.length} ta mahsulot sotildi`,
+        variant: "success",
+      })
+    } catch (error) {
+      console.error("Error selling GMs:", error)
+      showToast({
         title: t("common.error"),
-        description: "Kodi, Nomi, Kompaniya, and Narxi are required.",
+        description: "Mahsulotlarni sotishda xatolik yuz berdi",
         variant: "destructive",
       })
-      return
     }
+  }
 
+  const printReceipt = () => {
+    window.print()
+  }
+
+  const handleCreate = async () => {
     try {
       setIsSubmitting(true)
 
       await addGM({
         kodi: formData.kodi,
         model: formData.model,
-        nomi: formData.nomi, // This might be redundant if tovar is primary name
+        nomi: formData.nomi,
         kompaniya: formData.kompaniya,
-        narxi: formData.narxi.replace(/[^0-9.-]/g, ""), // Clean up price input
+        narxi: formData.narxi,
         stock: Number.parseInt(formData.stock) || 0,
         minStock: Number.parseInt(formData.minStock) || 10,
         maxStock: Number.parseInt(formData.maxStock) || 1000,
@@ -322,22 +571,23 @@ export default function GMPage() {
         description: formData.description,
         status: formData.status,
         sold: 0,
-        // New fields from import update, potentially set by user or defaults
-        tovar: formData.tovar || formData.nomi, // Use tovar if provided, else nomi
-        olchBirligi: formData.olchBirligi,
       })
 
-      await loadData() // Reload all data
+      await loadGMs()
+      await loadLowStockGMs()
+      await loadInventoryValue()
+      await loadCompanyData() // Reload company data
+      await loadCategoryData() // Reload category data
       setIsCreateModalOpen(false)
       resetFormData()
-      toast({
+      showToast({
         title: t("common.success"),
         description: t("GMCreated"),
         variant: "success",
       })
     } catch (error) {
       console.error("Error creating GM:", error)
-      toast({
+      showToast({
         title: t("common.error"),
         description: "Failed to create GM",
         variant: "destructive",
@@ -366,19 +616,17 @@ export default function GMPage() {
       dimensions: "",
       description: "",
       status: "active",
-      tovar: "", // Reset new fields
-      olchBirligi: "",
     })
   }
 
   const handleEdit = (row: GM) => {
-    setEditingGM(row)
+    setEditingRow(row)
     setFormData({
       kodi: row.kodi,
-      model: row.model || "",
-      nomi: row.nomi || "",
-      kompaniya: row.kompaniya || "",
-      narxi: row.narxi || "",
+      model: row.model,
+      nomi: row.nomi,
+      kompaniya: row.kompaniya,
+      narxi: row.narxi,
       stock: (row.stock || 0).toString(),
       minStock: (row.minStock || 10).toString(),
       maxStock: (row.maxStock || 1000).toString(),
@@ -391,34 +639,22 @@ export default function GMPage() {
       dimensions: row.dimensions || "",
       description: row.description || "",
       status: row.status || "active",
-      tovar: row.tovar || row.nomi || "", // Populate new fields
-      olchBirligi: row.olchBirligi || "",
     })
     setIsEditModalOpen(true)
   }
 
   const handleUpdate = async () => {
-    if (!editingGM?.id) return
-
-    // Basic validation
-    if (!formData.kodi || !formData.nomi || !formData.kompaniya || !formData.narxi) {
-      toast({
-        title: t("common.error"),
-        description: "Kodi, Nomi, Kompaniya, and Narxi are required.",
-        variant: "destructive",
-      })
-      return
-    }
+    if (!editingRow?.id) return
 
     try {
       setIsSubmitting(true)
 
-      await updateGM(editingGM.id, {
+      await updateGM(editingRow.id, {
         kodi: formData.kodi,
         model: formData.model,
         nomi: formData.nomi,
         kompaniya: formData.kompaniya,
-        narxi: formData.narxi.replace(/[^0-9.-]/g, ""), // Clean up price input
+        narxi: formData.narxi,
         stock: Number.parseInt(formData.stock) || 0,
         minStock: Number.parseInt(formData.minStock) || 10,
         maxStock: Number.parseInt(formData.maxStock) || 1000,
@@ -431,22 +667,24 @@ export default function GMPage() {
         dimensions: formData.dimensions,
         description: formData.description,
         status: formData.status,
-        tovar: formData.tovar || formData.nomi, // Update new fields
-        olchBirligi: formData.olchBirligi,
       })
 
-      await loadData() // Reload all data
+      await loadGMs()
+      await loadLowStockGMs()
+      await loadInventoryValue()
+      await loadCompanyData() // Reload company data
+      await loadCategoryData() // Reload category data
       setIsEditModalOpen(false)
-      setEditingGM(null)
+      setEditingRow(null)
       resetFormData()
-      toast({
+      showToast({
         title: t("common.success"),
         description: t("GMUpdated"),
         variant: "success",
       })
     } catch (error) {
       console.error("Error updating GM:", error)
-      toast({
+      showToast({
         title: t("common.error"),
         description: "Failed to update GM",
         variant: "destructive",
@@ -468,17 +706,21 @@ export default function GMPage() {
       setIsSubmitting(true)
 
       await deleteGM(deletingGM.id)
-      await loadData() // Reload all data
+      await loadGMs()
+      await loadLowStockGMs()
+      await loadInventoryValue()
+      await loadCompanyData() // Reload company data
+      await loadCategoryData() // Reload category data
       setIsDeleteModalOpen(false)
       setDeletingGM(null)
-      toast({
+      showToast({
         title: t("common.success"),
         description: t("GMDeleted"),
         variant: "success",
       })
     } catch (error) {
       console.error("Error deleting GM:", error)
-      toast({
+      showToast({
         title: t("common.error"),
         description: "Failed to delete GM",
         variant: "destructive",
@@ -492,16 +734,20 @@ export default function GMPage() {
     try {
       setIsSubmitting(true)
       await deleteAllGMs()
-      await loadData() // Reload all data
+      await loadGMs()
+      await loadLowStockGMs()
+      await loadInventoryValue()
+      await loadCompanyData() // Reload company data
+      await loadCategoryData() // Reload category data
       setIsDeleteAllModalOpen(false)
-      toast({
+      showToast({
         title: t("common.success"),
         description: t("deleteAllSuccess"),
         variant: "success",
       })
     } catch (error) {
       console.error("Error deleting all GMs:", error)
-      toast({
+      showToast({
         title: t("common.error"),
         description: "Failed to delete all GMs",
         variant: "destructive",
@@ -519,41 +765,26 @@ export default function GMPage() {
 
   const confirmSell = async () => {
     if (!sellingGM?.id) return
-    if (sellQuantity <= 0) {
-      toast({
-        title: t("common.error"),
-        description: "Quantity must be greater than 0.",
-        variant: "destructive",
-      })
-      return
-    }
-    if ((sellingGM.stock || 0) < sellQuantity) {
-      toast({
-        title: t("common.error"),
-        description: `Not enough stock. Available: ${sellingGM.stock}`,
-        variant: "destructive",
-      })
-      return
-    }
 
     try {
       setIsSubmitting(true)
 
       await sellGM(sellingGM.id, sellQuantity)
-      await loadData() // Reload all data
-      // Update sales trend after sale
-      await loadSalesTrend()
+      await loadGMs()
+      await loadLowStockGMs()
+      await loadInventoryValue()
+      await loadSalesTrend() // Update sales trend after sale
       setIsSellModalOpen(false)
       setSellingGM(null)
       setSellQuantity(1)
-      toast({
+      showToast({
         title: t("common.success"),
         description: t("GMSold", { quantity: sellQuantity, name: sellingGM.nomi }),
         variant: "success",
       })
     } catch (error) {
       console.error("Error selling GM:", error)
-      toast({
+      showToast({
         title: t("common.error"),
         description: "Failed to sell GM",
         variant: "destructive",
@@ -572,14 +803,6 @@ export default function GMPage() {
 
   const confirmStockAction = async () => {
     if (!stockGM?.id) return
-    if (stockQuantity <= 0) {
-      toast({
-        title: t("common.error"),
-        description: "Quantity must be greater than 0.",
-        variant: "destructive",
-      })
-      return
-    }
 
     try {
       setIsSubmitting(true)
@@ -587,34 +810,25 @@ export default function GMPage() {
       if (stockAction === "add") {
         await addStock(stockGM.id, stockQuantity)
       } else {
-        // Check for sufficient stock before removing
-        if ((stockGM.stock || 0) < stockQuantity) {
-          toast({
-            title: t("common.error"),
-            description: `Not enough stock. Available: ${stockGM.stock}`,
-            variant: "destructive",
-          })
-          setIsSubmitting(false)
-          return
-        }
         await removeStock(stockGM.id, stockQuantity)
       }
 
-      await loadData() // Reload all data
-      // Update sales trend after stock change
-      await loadSalesTrend()
+      await loadGMs()
+      await loadLowStockGMs()
+      await loadInventoryValue()
+      await loadSalesTrend() // Update sales trend after stock change
       await loadCategoryData() // Reload category data
       setIsStockModalOpen(false)
       setStockGM(null)
       setStockQuantity(1)
-      toast({
+      showToast({
         title: t("common.success"),
-        description: `${stockAction === "add" ? t("warehouse.added") : t("warehouse.removed")} ${stockQuantity} ${t("items")}`,
+        description: `${stockAction === "add" ? "Added" : "Removed"} ${stockQuantity} items`,
         variant: "success",
       })
     } catch (error) {
       console.error("Error updating stock:", error)
-      toast({
+      showToast({
         title: t("common.error"),
         description: "Failed to update stock",
         variant: "destructive",
@@ -638,155 +852,136 @@ export default function GMPage() {
     }
   }
 
-  // Renamed handleFileSelect to handleFileUpload to match update
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
-    if (!file) return
-
-    setIsImporting(true) // Use setIsImporting for the import process
-    setShowImportDialog(true) // Show the dialog to confirm import
-    setImportFile(file) // Store the file for confirmation
-    event.target.value = "" // Clear the input
+    if (file) {
+      setImportFile(file)
+      setShowImportDialog(true)
+    }
+    event.target.value = ""
   }
 
   const handleCancelImport = () => {
     setShowImportDialog(false)
     setImportFile(null)
-    setIsImporting(false)
+    setIsUploading(false)
     setUploadProgress(0)
   }
 
-  // Updated handleConfirmImport to match new structure and logic
   const handleConfirmImport = async () => {
     if (!importFile) return
 
-    setIsImporting(true) // Start the import process
-    setUploadProgress(0) // Reset progress
+    const reader = new FileReader()
+    reader.onload = async (e) => {
+      try {
+        setIsUploading(true)
+        setUploadProgress(0)
 
-    try {
-      const dataBuffer = await importFile.arrayBuffer()
-      const workbook = XLSX.read(dataBuffer)
-      const worksheet = workbook.Sheets[workbook.SheetNames[0]]
-      const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][]
+        const data = new Uint8Array(e.target?.result as ArrayBuffer)
+        const workbook = XLSX.read(data, { type: "array" })
+        const sheetName = workbook.SheetNames[0]
+        const worksheet = workbook.Sheets[sheetName]
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][]
 
-      const errors: string[] = []
-      let successCount = 0
-      const totalRows = jsonData.length - 1 // Exclude header row
+        const rows = jsonData.slice(1).filter((row) => row.length >= 5)
+        setUploadProgress(10)
 
-      setUploadProgress(5) // Initial progress
+        let successCount = 0
+        const errors: string[] = []
+        const totalRows = rows.length
 
-      for (let i = 1; i < jsonData.length; i++) {
-        // Start from 1 to skip header
-        const row = jsonData[i]
-        if (!row || row.length === 0) continue
+        for (let i = 0; i < rows.length; i++) {
+          const row = rows[i]
+          try {
+            const [kodi, model, nomi, kompaniya, narxi] = row
 
-        try {
-          // Support both old format (kodi, model, nomi, kompaniya, narxi) and new format (Kod, Tovar, O'lch. birligi, Narx)
-          const [col1, col2, col3, col4, col5] = row
+            if (!kodi || !nomi || !kompaniya || !narxi) {
+              errors.push(`Row ${i + 2}: missing required fields`)
+              continue
+            }
 
-          // Detect format based on column count and content
-          let kodi, tovar, olchBirligi, narxi, model, kompaniya, nomi
+            await addGM({
+              kodi: String(kodi).trim(),
+              model: String(model || "").trim(),
+              nomi: String(nomi).trim(),
+              kompaniya: String(kompaniya).trim(),
+              narxi: String(narxi).replace(/\s/g, ""),
+              sold: 0,
+            })
 
-          if (row.length === 4) {
-            // New format: Kod, Tovar, O'lch. birligi, Narx
-            ;[kodi, tovar, olchBirligi, narxi] = row
-            nomi = tovar // Use tovar as nomi if not explicitly provided
-          } else if (row.length >= 5) {
-            // Old format: kodi, model, nomi, kompaniya, narxi
-            ;[kodi, model, nomi, kompaniya, narxi] = row
-            tovar = nomi // If old format, tovar might be same as nomi
-          } else {
-            errors.push(`Row ${i + 2}: invalid format (expected 4 or >=5 columns)`)
-            continue
+            successCount++
+            setUploadProgress(10 + ((i + 1) / totalRows) * 80)
+          } catch (error) {
+            console.error("Error adding GM:", error)
+            errors.push(`Failed to add GM: ${row[0]}`)
           }
-
-          if (!kodi || !tovar || !narxi) {
-            errors.push(`Row ${i + 2}: missing required fields (Kod, Tovar, Narx)`)
-            continue
-          }
-
-          await addGM({
-            kodi: String(kodi).trim(),
-            tovar: String(tovar).trim(),
-            nomi: String(nomi).trim(), // Keep nomi for consistency if needed, but tovar is primary
-            olchBirligi: olchBirligi ? String(olchBirligi).trim() : "",
-            model: model ? String(model).trim() : "",
-            kompaniya: kompaniya ? String(kompaniya).trim() : "",
-            narxi: String(narxi).replace(/\s/g, ""), // Clean price
-            sold: 0,
-            stock: 0, // Default stock to 0 on import
-            // Other fields like description, status, etc., will be null/empty unless explicitly in file
-          })
-
-          successCount++
-          setUploadProgress(5 + (i / totalRows) * 85) // Update progress
-        } catch (error) {
-          console.error("Error processing row:", error)
-          errors.push(`Row ${i + 2}: ${error instanceof Error ? error.message : "unknown error"}`)
         }
-      }
 
-      setUploadProgress(95) // Almost done
+        setUploadProgress(90)
+        await loadGMs()
+        await loadLowStockGMs()
+        await loadInventoryValue()
+        await loadCompanyData()
+        await loadCategoryData()
+        setUploadProgress(100)
 
-      // Reload data after import
-      await loadData()
-
-      if (errors.length > 0) {
-        toast({
-          title: t("import.partialSuccess"),
-          description: `${successCount} ${t("import.imported")}, ${errors.length} ${t("import.failed")}. See console for details.`,
-          variant: "default",
-        })
-        console.warn("Import Errors:", errors)
-      } else {
-        toast({
-          title: t("import.success"),
-          description: `${successCount} ${t("import.imported")}`,
+        showToast({
+          title: t("common.success"),
+          description: `${successCount} GMs imported successfully${errors.length > 0 ? `. ${errors.length} errors occurred.` : ""}`,
           variant: "success",
         })
-      }
 
-      setShowImportDialog(false) // Close the import confirmation dialog
-      setImportFile(null) // Clear the file state
-    } catch (error) {
-      console.error("Error processing Excel file:", error)
-      toast({
-        title: t("import.error"),
-        description: error instanceof Error ? error.message : t("import.unknownError"),
-        variant: "destructive",
-      })
-    } finally {
-      setIsImporting(false)
-      setUploadProgress(100) // Complete progress bar
+        if (errors.length > 0) {
+          console.warn("Import errors:", errors)
+        }
+
+        setShowImportDialog(false)
+        setImportFile(null)
+      } catch (error) {
+        console.error("Error processing Excel file:", error)
+        showToast({
+          title: t("common.error"),
+          description: "Failed to process Excel file. Please check the format.",
+          variant: "destructive",
+        })
+      } finally {
+        setIsUploading(false)
+        setUploadProgress(0)
+      }
     }
+    reader.readAsArrayBuffer(importFile)
   }
 
-  // Updated handleExportExcel to match new data structure
   const handleExportExcel = () => {
-    const exportData = data.map((gm) => ({
-      Kod: gm.kodi,
-      Tovar: gm.tovar || gm.nomi || "-", // Use tovar or nomi
-      "O'lch. birligi": gm.olchBirligi || "-",
-      Narx: typeof gm.narxi === "string" ? Number.parseFloat(gm.narxi.replace(/[^\d.-]/g, "")) || 0 : gm.narxi || 0, // Clean and parse price
-      Sold: gm.sold || 0,
-      Stock: gm.stock || 0,
-      "Min Stock": gm.minStock || 10,
-      "Max Stock": gm.maxStock || 1000,
-      Kompaniya: gm.kompaniya || "-",
-      Status: gm.status || "active",
-      // Add other fields if necessary for export, e.g., location, supplier, etc.
-      // Model: gm.model || "-",
-      // Description: gm.description || "-",
+    const exportData = data.map((GM) => ({
+      KODI: GM.kodi,
+      MODEL: GM.model,
+      NOMI: GM.nomi,
+      KOMPANIYA: GM.kompaniya,
+      NARXI: GM.narxi,
+      SOLD: GM.sold || 0,
+      STOCK: GM.stock || 0,
+      MIN_STOCK: GM.minStock || 0,
+      MAX_STOCK: GM.maxStock || 0,
+      LOCATION: GM.location || "",
+      CATEGORY: GM.category || "",
+      SUPPLIER: GM.supplier || "",
+      COST: GM.cost || "",
+      STATUS: GM.status || "active",
+      BARCODE: GM.barcode || "",
+      WEIGHT: GM.weight || 0,
+      DIMENSIONS: GM.dimensions || "",
+      DESCRIPTION: GM.description || "",
     }))
 
     const ws = XLSX.utils.json_to_sheet(exportData)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, "GMs")
-    XLSX.writeFile(wb, `gm-data-${new Date().toISOString().split("T")[0]}.xlsx`)
+    XLSX.writeFile(wb, "warehouse_inventory.xlsx")
 
-    toast({
-      title: t("export.success"),
-      description: t("export.downloaded"),
+    showToast({
+      title: t("common.success"),
+      description: "Inventory exported successfully",
       variant: "success",
     })
   }
@@ -795,15 +990,13 @@ export default function GMPage() {
     const filtered = data.filter((row) => {
       const matchesSearch =
         searchTerm === "" ||
-        row.nomi?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        String(row.kodi).toLowerCase().includes(searchTerm.toLowerCase()) ||
-        row.kompaniya?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        row.model?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        row.tovar?.toLowerCase().includes(searchTerm.toLowerCase()) || // Search by tovar
+        row.nomi.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        row.kodi.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        row.kompaniya.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        row.model.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (row.category || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
         (row.supplier || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (row.location || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (row.olchBirligi || "").toLowerCase().includes(searchTerm.toLowerCase()) // Search by olchBirligi
+        (row.location || "").toLowerCase().includes(searchTerm.toLowerCase())
 
       const matchesCompany = companyFilter === "all" || row.kompaniya === companyFilter
       const matchesCategory = categoryFilter === "all" || row.category === categoryFilter
@@ -828,7 +1021,6 @@ export default function GMPage() {
 
         // Handle numeric fields
         if (["narxi", "stock", "sold", "minStock", "maxStock", "weight"].includes(sortColumn)) {
-          // Attempt to parse numeric values, fallback to 0 for sorting
           aValue = Number.parseFloat(String(aValue).replace(/[^\d.-]/g, "")) || 0
           bValue = Number.parseFloat(String(bValue).replace(/[^\d.-]/g, "")) || 0
         }
@@ -874,15 +1066,15 @@ export default function GMPage() {
   const totalSales = data.reduce((sum, GM) => sum + (GM.sold || 0), 0)
 
   const totalRevenue = data.reduce((sum, GM) => {
-    const price = Number.parseFloat(GM.narxi?.toString().replace(/[^0-9.-]/g, "") || "0")
+    const price = Number.parseFloat(GM.narxi?.toString().replace(/[^0-9.-]/g, "")) || 0
     const sold = GM.sold || 0
-    return sum + sold * (isNaN(price) ? 0 : price)
+    return sum + sold * price
   }, 0)
 
   const averagePrice =
     data.length > 0
       ? data.reduce((sum, GM) => {
-          const price = Number.parseFloat(GM.narxi?.toString().replace(/[^0-9.-]/g, "") || "0")
+          const price = Number.parseFloat(GM.narxi?.toString().replace(/[^0-9.-]/g, "")) || 0
           return sum + (isNaN(price) ? 0 : price)
         }, 0) / data.length
       : 0
@@ -897,7 +1089,7 @@ export default function GMPage() {
   const companyStats = data.reduce(
     (acc, GM) => {
       const company = GM.kompaniya || "Unknown"
-      const price = Number.parseFloat(GM.narxi?.toString().replace(/[^0-9.-]/g, "") || "0")
+      const price = Number.parseFloat(GM.narxi?.toString().replace(/[^0-9.-]/g, "")) || 0
       const sold = GM.sold || 0
 
       if (!acc[company]) {
@@ -937,7 +1129,7 @@ export default function GMPage() {
     .slice(0, 10)
     .map((GM, index) => ({
       rank: index + 1,
-      name: GM.tovar || GM.nomi || "Unknown", // Use tovar or nomi
+      name: GM.nomi || "Unknown",
       company: GM.kompaniya || "Unknown",
       sold: GM.sold || 0,
       revenue: (GM.sold || 0) * Number.parseFloat(GM.narxi?.toString().replace(/[^0-9.-]/g, "") || "0"),
@@ -955,6 +1147,155 @@ export default function GMPage() {
     { name: t("stats.lowStock"), value: stockAnalytics.lowStock, color: "#f59e0b" },
     { name: t("stats.outOfStock"), value: stockAnalytics.outOfStock, color: "#ef4444" },
   ]
+
+  const loadLoans = async () => {
+    try {
+      const loansData = await getLoans()
+      setLoans(loansData)
+    } catch (error) {
+      console.error("Error loading loans:", error)
+    }
+  }
+
+  const loadPendingLoans = async () => {
+    try {
+      const pending = await getPendingLoans()
+      setPendingLoans(pending)
+    } catch (error) {
+      console.error("Error loading pending loans:", error)
+    }
+  }
+
+  const loadTotalLoanAmount = async () => {
+    try {
+      const total = await getTotalLoanAmount()
+      setTotalLoanAmount(total)
+    } catch (error) {
+      console.error("Error loading total loan amount:", error)
+    }
+  }
+
+  const loadSaleGMs = async () => {
+    try {
+      const transactions = await getSaleGMs()
+      setSaleGMs(transactions)
+    } catch (error) {
+      console.error("Error loading sale transactions:", error)
+      showToast({
+        title: t("common.error"),
+        description: "Sotilgan mahsulotlar tarixini yuklashda xatolik", // Error loading sales history
+        variant: "destructive",
+      })
+    }
+  }
+
+  // Filter loans based on status and search query
+  const filteredLoans = useMemo(() => {
+    const searchLower = loanSearchQuery.toLowerCase()
+    return loans.filter((loan) => {
+      const matchesStatus =
+        loanStatusFilter === "all" ||
+        loan.status === loanStatusFilter ||
+        (loanStatusFilter === "partial" &&
+          loan.amountRemaining !== undefined &&
+          loan.amountRemaining > 0 &&
+          loan.amountRemaining < loan.totalAmount)
+      const matchesSearch =
+        !searchLower ||
+        loan.customerName.toLowerCase().includes(searchLower) ||
+        loan.customerPhone.toLowerCase().includes(searchLower) ||
+        (loan.notes || "").toLowerCase().includes(searchLower)
+
+      return matchesStatus && matchesSearch
+    })
+  }, [loans, loanStatusFilter, loanSearchQuery])
+
+  // Updated filteredSales to correctly include paid loans with their items
+  const filteredSales = useMemo(() => {
+    // Get regular sales (non-loan transactions)
+    const regularSales = saleGMs.filter((transaction) => !transaction.isLoan)
+
+    // Get paid loans and map them with their transaction items
+    const paidLoans = loans
+      .filter((loan) => loan.status === "paid")
+      .map((loan) => {
+        // Find the corresponding transaction to get items
+        const transaction = saleGMs.find((t) => t.id === loan.transactionId)
+
+        return {
+          id: loan.id,
+          receiptNumber: loan.receiptNumber,
+          items: transaction?.items || [],
+          totalAmount: loan.totalAmount,
+          saleDate: loan.loanDate || loan.saleDate || Timestamp.now(), // Use loanDate or fallback
+          isLoan: true,
+          isPaidLoan: true, // Mark as paid loan for display
+          customerName: loan.customerName,
+          customerPhone: loan.customerPhone,
+          customerAddress: loan.customerAddress,
+        }
+      })
+
+    // Combine regular sales and paid loans, then sort by date
+    const allSales = [...regularSales, ...paidLoans].sort((a, b) => {
+      const dateA = a.saleDate?.toDate?.() || new Date(0)
+      const dateB = b.saleDate?.toDate?.() || new Date(0)
+      return dateB.getTime() - dateA.getTime()
+    })
+
+    // Apply date filtering
+    const now = new Date()
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)
+    const monthAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000)
+
+    let dateFilteredSales = allSales
+    if (salesHistoryFilter === "today") {
+      dateFilteredSales = allSales.filter((transaction) => transaction.saleDate?.toDate?.() >= today)
+    } else if (salesHistoryFilter === "week") {
+      dateFilteredSales = allSales.filter((transaction) => transaction.saleDate?.toDate?.() >= weekAgo)
+    } else if (salesHistoryFilter === "month") {
+      dateFilteredSales = allSales.filter((transaction) => transaction.saleDate?.toDate?.() >= monthAgo)
+    }
+
+    // Apply search filter
+    if (!salesSearchQuery.trim()) return dateFilteredSales
+
+    const searchLower = salesSearchQuery.toLowerCase()
+    return dateFilteredSales.filter((transaction) => {
+      const receiptMatch = transaction.receiptNumber.toLowerCase().includes(searchLower)
+      const dateMatch = transaction.saleDate?.toDate?.()?.toLocaleDateString("uz-UZ").includes(searchLower)
+      const GMMatch = transaction.items.some(
+        (item) =>
+          item.GMName.toLowerCase().includes(searchLower) ||
+          item.GMCode?.toLowerCase().includes(searchLower) ||
+          item.company?.toLowerCase().includes(searchLower),
+      )
+      const customerMatch =
+        (transaction.customerName?.toLowerCase().includes(searchLower) ||
+          transaction.customerPhone?.toLowerCase().includes(searchLower)) ??
+        false
+      return receiptMatch || dateMatch || GMMatch || customerMatch
+    })
+  }, [saleGMs, loans, salesHistoryFilter, salesSearchQuery])
+
+  const loansTotalPages = Math.ceil(filteredLoans.length / loansPerPage)
+  const loansStartIndex = (loansPage - 1) * loansPerPage
+  const loansEndIndex = loansStartIndex + loansPerPage
+  const paginatedLoans = filteredLoans.slice(loansStartIndex, loansEndIndex)
+
+  const salesTotalPages = Math.ceil(filteredSales.length / salesPerPage)
+  const salesStartIndex = (salesPage - 1) * salesPerPage
+  const salesEndIndex = salesStartIndex + salesPerPage
+  const paginatedSales = filteredSales.slice(salesStartIndex, salesEndIndex)
+
+  const totalSalesAmount = useMemo(() => {
+    return filteredSales.reduce((sum, t) => sum + t.totalAmount, 0)
+  }, [filteredSales])
+
+  const totalItemsSold = useMemo(() => {
+    return filteredSales.reduce((sum, t) => sum + t.items.reduce((itemSum, item) => itemSum + item.quantity, 0), 0)
+  }, [filteredSales])
 
   // Modified loading state handling
   if (loading || isInitialLoading) {
@@ -974,13 +1315,222 @@ export default function GMPage() {
 
   const handleRefresh = async () => {
     setRefreshing(true)
-    await loadData() // Use consolidated loadData
+    await loadData()
+    await loadSaleGMs() // Also refresh sales history
     setRefreshing(false)
-    toast({ title: t("common.success"), description: t("data.refreshed"), variant: "success" })
+    showToast({ title: t("common.success"), description: t("data.refreshed"), variant: "success" })
   }
 
-  // Current data for display (pagination applied)
-  const currentData = paginatedData
+  const getFilteredSales = () => {
+    const now = new Date()
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)
+    const monthAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000)
+
+    return saleGMs.filter((transaction) => {
+      if (transaction.isLoan) {
+        return false
+      }
+
+      const saleDate = transaction.saleDate.toDate()
+
+      switch (salesHistoryFilter) {
+        case "today":
+          return saleDate >= today
+        case "week":
+          return saleDate >= weekAgo
+        case "month":
+          return saleDate >= monthAgo
+        default: // "all"
+          return true
+      }
+    })
+  }
+
+  const handleAddLoanPayment = async () => {
+    if (!selectedLoan) return
+
+    try {
+      const amount = Number.parseFloat(loanPaymentData.amount)
+      if (isNaN(amount) || amount <= 0) {
+        showToast({
+          title: t("common.error"),
+          description: "To'g'ri summa kiriting",
+          variant: "destructive",
+        })
+        return
+      }
+
+      if (amount > (selectedLoan.amountRemaining || 0)) {
+        showToast({
+          title: t("common.error"),
+          description: "Summa qolgan qarzdan ko'p bo'lmasligi kerak",
+          variant: "destructive",
+        })
+        return
+      }
+
+      await addLoanPayment(selectedLoan.id!, amount, loanPaymentData.note)
+
+      showToast({
+        title: t("common.success"),
+        description: t("loan.paymentSuccess"),
+        variant: "success",
+      })
+
+      setIsLoanPaymentModalOpen(false)
+      setLoanPaymentData({ amount: "", note: "" })
+      setSelectedLoan(null)
+      await loadLoans()
+      await loadPendingLoans()
+      await loadTotalLoanAmount()
+    } catch (error) {
+      console.error("Error adding loan payment:", error)
+      showToast({
+        title: t("common.error"),
+        description: "To'lovni qo'shishda xatolik yuz berdi",
+        variant: "destructive",
+      })
+    }
+  }
+
+  // Render function for the loans table with GM details
+  const renderLoansTable = () => {
+    return (
+      <div className="space-y-4">
+        {paginatedLoans.map((loan) => {
+          // Find the transaction to get GM items
+          const transaction = saleGMs.find((t) => t.id === loan.transactionId)
+          const items = transaction?.items || []
+
+          return (
+            <Card key={loan.id} className="border-l-4 border-l-primary">
+              <CardContent className="pt-6">
+                <div className="flex flex-col gap-4">
+                  {/* Customer Info */}
+                  <div className="flex items-start justify-between">
+                    <div className="space-y-2 flex-1">
+                      <div className="flex items-center gap-3">
+                        <Users className="h-5 w-5 text-muted-foreground" />
+                        <div>
+                          <p className="font-semibold text-lg">{loan.customerName}</p>
+                          {loan.customerPhone && <p className="text-sm text-muted-foreground">{loan.customerPhone}</p>}
+                        </div>
+                      </div>
+
+                      {/* GM Details */}
+                      {items.length > 0 && (
+                        <div className="mt-3 p-3 bg-gray-50 rounded-lg">
+                          <p className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
+                            <Package className="h-3 w-3" />
+                            Mahsulotlar:
+                          </p>
+                          <div className="space-y-1.5">
+                            {items.map((item, idx) => (
+                              <div key={idx} className="text-sm">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="flex-1">
+                                    <p className="font-medium text-gray-900">{item.GMName}</p>
+                                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-600 mt-0.5">
+                                      <span>Kod: {item.GMCode}</span>
+                                      <span>•</span>
+                                      <span>{item.company}</span>
+                                      {item.location && (
+                                        <>
+                                          <span>•</span>
+                                          <span className="flex items-center gap-0.5">
+                                            <MapPin className="h-3 w-3" />
+                                            {item.location}
+                                          </span>
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="text-right whitespace-nowrap">
+                                    <p className="text-xs text-gray-600">
+                                      {item.quantity} x ${item.price.toFixed(2)}
+                                    </p>
+                                    <p className="font-semibold text-sm">${(item.quantity * item.price).toFixed(2)}</p>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Financial Info */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+                        <div>
+                          <p className="text-xs text-muted-foreground">{t("loan.totalAmount")}</p>
+                          <p className="font-semibold">${loan.totalAmount.toLocaleString()}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">{t("loan.amountPaid")}</p>
+                          <p className="font-semibold text-green-600">${(loan.amountPaid || 0).toLocaleString()}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">{t("loan.amountRemaining")}</p>
+                          <p className="font-semibold text-orange-600">
+                            ${(loan.amountRemaining || 0).toLocaleString()}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">{t("loan.status")}</p>
+                          <Badge
+                            variant={
+                              loan.status === "paid"
+                                ? "default"
+                                : loan.status === "partial"
+                                  ? "secondary"
+                                  : "destructive"
+                            }
+                          >
+                            {t(`loan.status.${loan.status}`)}
+                          </Badge>
+                        </div>
+                      </div>
+
+                      {loan.notes && (
+                        <p className="text-sm text-muted-foreground mt-2">
+                          <span className="font-medium">Eslatma:</span> {loan.notes}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="flex gap-2 ml-4">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setSelectedLoan(loan)
+                          setIsLoanDetailsModalOpen(true)
+                        }}
+                      >
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                      {loan.status !== "paid" && (
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            setSelectedLoan(loan)
+                            setIsLoanPaymentModalOpen(true)
+                          }}
+                        >
+                          <CreditCard className="h-4 w-4 mr-2" />
+                          {t("loan.makePayment")}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )
+        })}
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6 p-4 lg:p-6">
@@ -1015,14 +1565,13 @@ export default function GMPage() {
           </Button>
 
           <div className="relative">
-            <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".xlsx,.xls" className="hidden" />
+            <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept=".xlsx,.xls" className="hidden" />
             <Button
               onClick={() => fileInputRef.current?.click()}
               variant="outline"
               className="flex items-center gap-2 bg-transparent"
-              disabled={isImporting} // Disable button during import
             >
-              {isImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+              <Upload className="h-4 w-4" />
               {t("data.import")}
             </Button>
           </div>
@@ -1110,8 +1659,7 @@ export default function GMPage() {
         </Card>
       )}
 
-      {/* Import Progress Indicator */}
-      {isImporting && uploadProgress > 0 && (
+      {isUploading && (
         <Card className="mb-6 border-0 shadow-lg bg-gradient-to-r from-blue-50 to-indigo-50 border-l-4 border-l-blue-500">
           <CardContent className="p-6">
             <div className="space-y-4">
@@ -1132,14 +1680,22 @@ export default function GMPage() {
       )}
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-2 mb-6 h-12 lg:h-10">
-          <TabsTrigger value="table" className="text-sm lg:text-base font-medium">
-            <Table className="h-4 w-4 mr-2" />
+        <TabsList className="grid w-full grid-cols-4 mb-6 h-12 lg:h-10">
+          <TabsTrigger value="table" className="flex items-center gap-2 text-sm lg:text-base font-medium">
+            <Table className="h-4 w-4" />
             {t("tabs.table")}
           </TabsTrigger>
-          <TabsTrigger value="statistics" className="text-sm lg:text-base font-medium">
-            <BarChart3 className="h-4 w-4 mr-2" />
+          <TabsTrigger value="statistics" className="flex items-center gap-2 text-sm lg:text-base font-medium">
+            <BarChart3 className="h-4 w-4" />
             {t("tabs.statistics")}
+          </TabsTrigger>
+          <TabsTrigger value="loans" className="flex items-center gap-2 text-sm lg:text-base font-medium">
+            <HandCoins className="h-4 w-4" />
+            {t("loan.title")}
+          </TabsTrigger>
+          <TabsTrigger value="history" className="flex items-center gap-2 text-sm lg:text-base font-medium">
+            <Receipt className="h-4 w-4" />
+            Tarix
           </TabsTrigger>
         </TabsList>
 
@@ -1187,6 +1743,15 @@ export default function GMPage() {
 
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                   <div className="flex flex-wrap gap-2">
+                    {selectedGMs.size > 0 && (
+                      <Button
+                        onClick={() => setIsBulkSellModalOpen(true)}
+                        className="bg-purple-600 hover:bg-purple-700 text-white h-9 lg:h-10 text-sm"
+                      >
+                        <ShoppingCart className="h-4 w-4 mr-2" />
+                        Mahsulotlarni sotish ({selectedGMs.size}) {/* Sell GMs ({count}) */}
+                      </Button>
+                    )}
                     <Button
                       onClick={() => setIsAddModalOpen(true)}
                       className="bg-[#0099b5] hover:bg-[#0099b5]/90 text-white h-9 lg:h-10 text-sm"
@@ -1224,22 +1789,36 @@ export default function GMPage() {
                       id="file-upload"
                       type="file"
                       accept=".xlsx,.xls"
-                      onChange={handleFileUpload} // Use the updated handler
+                      onChange={handleFileSelect}
                       className="hidden"
                     />
                   </div>
                 </div>
+
+                {uploadProgress > 0 && uploadProgress < 100 && (
+                  <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div
+                      className="bg-[#0099b5] h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${uploadProgress}%` }}
+                    ></div>
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>
 
           <Card className="border-0 shadow-lg">
             <CardContent className="p-0">
-              {/* Desktop Table */}
               <div className="hidden lg:block overflow-x-auto">
                 <table className="w-full">
                   <thead className="bg-gray-50">
                     <tr>
+                      <th className="text-left py-4 px-6 font-semibold text-gray-700">
+                        <Checkbox
+                          checked={selectedGMs.size === paginatedData.length && paginatedData.length > 0}
+                          onCheckedChange={handleSelectAll}
+                        />
+                      </th>
                       <th
                         className="text-left py-4 px-6 font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors"
                         onClick={() => handleColumnClick("kodi")}
@@ -1247,7 +1826,7 @@ export default function GMPage() {
                       >
                         <div className="flex items-center gap-2">
                           <Hash className="h-4 w-4" />
-                          Kod
+                          {t("kodi")}
                           {sortColumn === "kodi" &&
                             (sortDirection === "asc" ? (
                               <ChevronUp className="h-4 w-4" />
@@ -1258,13 +1837,13 @@ export default function GMPage() {
                       </th>
                       <th
                         className="text-left py-4 px-6 font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors"
-                        onClick={() => handleColumnClick("tovar")} // Sort by tovar
-                        title={t("filter.tovar")} // Assuming t("filter.tovar") exists
+                        onClick={() => handleColumnClick("model")}
+                        title={t("filter.model")}
                       >
                         <div className="flex items-center gap-2">
-                          <Package className="h-4 w-4" />
-                          Tovar
-                          {sortColumn === "tovar" &&
+                          <Tag className="h-4 w-4" />
+                          {t("model")}
+                          {sortColumn === "model" &&
                             (sortDirection === "asc" ? (
                               <ChevronUp className="h-4 w-4" />
                             ) : (
@@ -1274,12 +1853,45 @@ export default function GMPage() {
                       </th>
                       <th
                         className="text-left py-4 px-6 font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors"
-                        onClick={() => handleColumnClick("olchBirligi")} // Sort by olchBirligi
+                        onClick={() => handleColumnClick("nomi")}
+                        title={t("filter.nomi")}
                       >
                         <div className="flex items-center gap-2">
-                          <Tag className="h-4 w-4" />
-                          O&apos;lch. birligi
-                          {sortColumn === "olchBirligi" &&
+                          <Package className="h-4 w-4" />
+                          {t("nomi")}
+                          {sortColumn === "nomi" &&
+                            (sortDirection === "asc" ? (
+                              <ChevronUp className="h-4 w-4" />
+                            ) : (
+                              <ChevronDown className="h-4 w-4" />
+                            ))}
+                        </div>
+                      </th>
+                      <th
+                        className="text-left py-4 px-6 font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors"
+                        onClick={() => handleColumnClick("kompaniya")}
+                        title={t("filter.kompaniya")}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Building2 className="h-4 w-4" />
+                          {t("kompaniya")}
+                          {sortColumn === "kompaniya" &&
+                            (sortDirection === "asc" ? (
+                              <ChevronUp className="h-4 w-4" />
+                            ) : (
+                              <ChevronDown className="h-4 w-4" />
+                            ))}
+                        </div>
+                      </th>
+                      <th
+                        className="text-left py-4 px-6 font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors"
+                        onClick={() => handleColumnClick("location")}
+                        title="Joylashuv"
+                      >
+                        <div className="flex items-center gap-2">
+                          <MapPin className="h-4 w-4" />
+                          Joylashuv
+                          {sortColumn === "location" &&
                             (sortDirection === "asc" ? (
                               <ChevronUp className="h-4 w-4" />
                             ) : (
@@ -1294,7 +1906,7 @@ export default function GMPage() {
                       >
                         <div className="flex items-center gap-2">
                           <DollarSign className="h-4 w-4" />
-                          Narx
+                          {t("narxi")}
                           {sortColumn === "narxi" &&
                             (sortDirection === "asc" ? (
                               <ChevronUp className="h-4 w-4" />
@@ -1348,27 +1960,54 @@ export default function GMPage() {
                       <tr
                         key={row.id}
                         className={cn(
-                          "hover:bg-gray-50 transition-colors cursor-pointer",
+                          "hover:bg-gray-50 transition-colors",
                           index % 2 === 0 ? "bg-white" : "bg-gray-50/30",
                         )}
-                        onClick={() => handleViewDetails(row)}
                       >
-                        <td className="py-4 px-6">
+                        <td className="py-4 px-6" onClick={(e) => e.stopPropagation()}>
+                          <Checkbox
+                            checked={selectedGMs.has(row.id || "")}
+                            onCheckedChange={(checked) => handleSelectGM(row.id || "", checked as boolean)}
+                          />
+                        </td>
+                        <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
                           <div className="flex items-center gap-2">
                             <div className="w-2 h-2 bg-[#0099b5] rounded-full"></div>
                             <span className="font-mono text-sm font-medium text-gray-900">{row.kodi}</span>
                           </div>
                         </td>
-                        <td className="py-4 px-6">
-                          <span className="text-gray-600 font-medium">{row.tovar || row.nomi || "-"}</span>
+                        <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
+                          <span className="text-gray-600 font-medium">{row.model || "-"}</span>
                         </td>
-                        <td className="py-4 px-6">
-                          <span className="text-gray-600 font-medium">{row.olchBirligi || "-"}</span>
+                        <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
+                          <div className="max-w-[200px]">
+                            <p className="text-gray-900 font-medium truncate" title={row.nomi}>
+                              {row.nomi || "-"}
+                            </p>
+                          </div>
                         </td>
-                        <td className="py-4 px-6">
+                        <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
+                          <Badge
+                            className="bg-[#0099b5]/10 text-[#0099b5] border border-[#0099b5]/20 cursor-pointer hover:bg-[#0099b5]/20 transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleCompanyClick(row.kompaniya)
+                            }}
+                            title={t("clickToFilter")}
+                          >
+                            {row.kompaniya || "-"}
+                          </Badge>
+                        </td>
+                        <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
+                          <div className="flex items-center gap-1 text-sm text-gray-600">
+                            <MapPin className="h-3 w-3" />
+                            {row.location || "-"}
+                          </div>
+                        </td>
+                        <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
                           <span className="font-semibold text-green-600 text-lg">{row.narxi}</span>
                         </td>
-                        <td className="py-4 px-6">
+                        <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
                           <Badge
                             className={cn(
                               "font-semibold",
@@ -1382,7 +2021,7 @@ export default function GMPage() {
                             {row.stock || 0}
                           </Badge>
                         </td>
-                        <td className="py-4 px-6">
+                        <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
                           <Badge className="bg-blue-100 text-blue-800 border border-blue-200 font-semibold">
                             {row.sold || 0}
                           </Badge>
@@ -1401,45 +2040,36 @@ export default function GMPage() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="text-[#0099b5] hover:bg-[#0099b5]/10 p-2 h-9 w-9 rounded-full"
                               onClick={() => handleEdit(row)}
+                              className="text-[#0099b5] hover:bg-[#0099b5]/10 p-2 h-9 w-9 rounded-full"
                               title={t("editGM")}
                             >
                               <Edit className="h-4 w-4" />
                             </Button>
 
                             <Button
+                              className="text-[#0099b5] hover:bg-[#0099b5]/10 p-2 h-9 w-9 rounded-full"
                               variant="ghost"
                               size="sm"
-                              className="text-[#0099b5] hover:bg-[#0099b5]/10 p-2 h-9 w-9 rounded-full"
                               onClick={() => handleStockAction(row, "add")}
                             >
-                              <PackagePlus className="h-4 w-4 mr-2 text-green-600" />
+                              <PackagePlus className="h-4 w-4 text-green-600" />
                             </Button>
                             <Button
+                              className="text-[#0099b5] hover:bg-[#0099b5]/10 p-2 h-9 w-9 rounded-full"
                               variant="ghost"
                               size="sm"
-                              className="text-[#0099b5] hover:bg-[#0099b5]/10 p-2 h-9 w-9 rounded-full"
                               onClick={() => handleStockAction(row, "remove")}
                             >
-                              <PackageMinus className="h-4 w-4 mr-2 text-orange-600" />
+                              <PackageMinus className="h-4 w-4 text-orange-600" />
                             </Button>
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="text-[#0099b5] hover:bg-[#0099b5]/10 p-2 h-9 w-9 rounded-full"
-                              onClick={() => handleSell(row)}
-                            >
-                              <ShoppingCart className="h-4 w-4 mr-2 text-purple-600" />
-                            </Button>
-                            <DropdownMenuSeparator />
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="text-[#0099b5] hover:bg-[#0099b5]/10 p-2 h-9 w-9 rounded-full"
                               onClick={() => handleDeleteClick(row)}
+                              className="text-red-600 hover:bg-red-50 p-2 h-9 w-9 rounded-full"
                             >
-                              <Trash2 className="h-4 w-4 mr-2" />
+                              <Trash2 className="h-4 w-4" />
                             </Button>
                           </div>
                         </td>
@@ -1449,7 +2079,6 @@ export default function GMPage() {
                 </table>
               </div>
 
-              {/* Mobile Table */}
               <div className="lg:hidden space-y-3 p-3">
                 {paginatedData.map((row) => (
                   <Card
@@ -1470,9 +2099,9 @@ export default function GMPage() {
                           </Badge>
                         </div>
 
-                        {/* GM name and tovar */}
+                        {/* GM name and model */}
                         <div>
-                          <h3 className="font-semibold text-gray-900 text-sm leading-tight">{row.tovar || row.nomi}</h3>
+                          <h3 className="font-semibold text-gray-900 text-sm leading-tight">{row.nomi}</h3>
                           {row.model && <p className="text-xs text-gray-600 mt-1">{row.model}</p>}
                         </div>
 
@@ -1534,28 +2163,31 @@ export default function GMPage() {
                             </Button>
                           </div>
                           <Button
+                            className="text-[#0099b5] hover:bg-[#0099b5]/10 p-2 h-9 w-9 rounded-full"
                             variant="ghost"
                             size="sm"
-                            className="text-[#0099b5] hover:bg-[#0099b5]/10 p-2 h-9 w-9 rounded-full"
                             onClick={() => handleStockAction(row, "add")}
                           >
-                            <PackagePlus className="h-4 w-4 mr-2 text-green-600" />
+                            <PackagePlus className="h-4 w-4 text-green-600" />
+                            {/* {t("action.addStock")} */}
                           </Button>
                           <Button
+                            className="text-[#0099b5] hover:bg-[#0099b5]/10 p-2 h-9 w-9 rounded-full"
                             variant="ghost"
                             size="sm"
-                            className="text-[#0099b5] hover:bg-[#0099b5]/10 p-2 h-9 w-9 rounded-full"
                             onClick={() => handleStockAction(row, "remove")}
                           >
-                            <PackageMinus className="h-4 w-4 mr-2 text-orange-600" />
+                            <PackageMinus className="h-4 w-4 text-orange-600" />
+                            {/* {t("action.removeStock")} */}
                           </Button>
                           <Button
+                            className="text-[#0099b5] hover:bg-[#0099b5]/10 p-2 h-9 w-9 rounded-full"
                             variant="ghost"
                             size="sm"
-                            className="text-[#0099b5] hover:bg-[#0099b5]/10 p-2 h-9 w-9 rounded-full"
                             onClick={() => handleSell(row)}
                           >
-                            <ShoppingCart className="h-4 w-4 mr-2 text-purple-600" />
+                            <ShoppingCart className="h-4 w-4 text-purple-600" />
+                            {/* {t("sellGM")} */}
                           </Button>
                           <DropdownMenuSeparator />
                           <Button
@@ -1564,7 +2196,8 @@ export default function GMPage() {
                             className="text-[#0099b5] hover:bg-[#0099b5]/10 p-2 h-9 w-9 rounded-full"
                             onClick={() => handleDeleteClick(row)}
                           >
-                            <Trash2 className="h-4 w-4 mr-2" />
+                            <Trash2 className="h-4 w-4 text-red-600" />
+                            {/* {t("deleteGM")} */}
                           </Button>
                         </div>
                       </div>
@@ -1895,6 +2528,705 @@ export default function GMPage() {
               </CardContent>
             </Card>
           </div>
+
+          <Card className="border-0 shadow-lg">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
+                    <ShoppingCart className="h-4 w-4 lg:h-5 lg:w-5 text-[#0099b5]" />
+                    Sotilgan mahsulotlar tarixi
+                  </CardTitle>
+                  <CardDescription className="text-sm">Barcha sotuvlar va ularning tafsilotlari</CardDescription>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant={salesHistoryFilter === "all" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setSalesHistoryFilter("all")}
+                    className={salesHistoryFilter === "all" ? "bg-[#0099b5] hover:bg-[#0099b5]/90" : ""}
+                  >
+                    Barchasi
+                  </Button>
+                  <Button
+                    variant={salesHistoryFilter === "today" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setSalesHistoryFilter("today")}
+                    className={salesHistoryFilter === "today" ? "bg-[#0099b5] hover:bg-[#0099b5]/90" : ""}
+                  >
+                    Bugun
+                  </Button>
+                  <Button
+                    variant={salesHistoryFilter === "week" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setSalesHistoryFilter("week")}
+                    className={salesHistoryFilter === "week" ? "bg-[#0099b5] hover:bg-[#0099b5]/90" : ""}
+                  >
+                    7 kun
+                  </Button>
+                  <Button
+                    variant={salesHistoryFilter === "month" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setSalesHistoryFilter("month")}
+                    className={salesHistoryFilter === "month" ? "bg-[#0099b5] hover:bg-[#0099b5]/90" : ""}
+                  >
+                    30 kun
+                  </Button>
+                </div>
+              </div>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Input
+                  type="text"
+                  placeholder="Chek raqami yoki mahsulot nomi bo'yicha qidirish..."
+                  value={salesSearchQuery}
+                  onChange={(e) => setSalesSearchQuery(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+            </CardHeader>
+            <CardContent>
+              {/* Sales Statistics Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <Card className="bg-gradient-to-br from-blue-50 to-blue-100">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-blue-700 font-medium">Jami sotuvlar</p>
+                        <p className="text-2xl font-bold text-blue-900">{filteredSales.length}</p>
+                      </div>
+                      <div className="p-3 bg-blue-500 rounded-full">
+                        <Receipt className="h-6 w-6 text-white" />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-gradient-to-br from-green-50 to-green-100">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-green-700 font-medium">Jami summa</p>
+                        <p className="text-2xl font-bold text-green-900">${totalSalesAmount.toLocaleString()}</p>
+                      </div>
+                      <div className="p-3 bg-green-500 rounded-full">
+                        <DollarSign className="h-6 w-6 text-white" />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-gradient-to-br from-purple-50 to-purple-100">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-purple-700 font-medium">Sotilgan mahsulotlar</p>
+                        <p className="text-2xl font-bold text-purple-900">{totalItemsSold}</p>
+                      </div>
+                      <div className="p-3 bg-purple-500 rounded-full">
+                        <Package className="h-6 w-6 text-white" />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Sales History Table */}
+              <div className="border rounded-lg overflow-hidden">
+                <div className="max-h-[500px] overflow-y-auto">
+                  {filteredSales.length === 0 ? (
+                    <div className="p-8 text-center text-gray-500">
+                      <ShoppingCart className="h-12 w-12 mx-auto mb-3 text-gray-400" />
+                      <p>Hozircha sotuvlar yo'q</p>
+                    </div>
+                  ) : (
+                    <table className="w-full">
+                      <thead className="bg-gray-50 sticky top-0">
+                        <tr>
+                          <th className="text-left py-3 px-4 font-semibold text-gray-700 text-sm">Chek raqami</th>
+                          <th className="text-left py-3 px-4 font-semibold text-gray-700 text-sm">Sana va vaqt</th>
+                          <th className="text-left py-3 px-4 font-semibold text-gray-700 text-sm">Mahsulotlar</th>
+                          <th className="text-right py-3 px-4 font-semibold text-gray-700 text-sm">Jami summa</th>
+                          <th className="text-center py-3 px-4 font-semibold text-gray-700 text-sm">Amallar</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {paginatedSales.map((transaction) => {
+                          if (!transaction.saleDate) return null
+                          const saleDate = transaction.saleDate.toDate()
+                          return (
+                            <tr
+                              key={transaction.id}
+                              className="border-t hover:bg-gray-50 cursor-pointer"
+                              onClick={() => {
+                                setSelectedSale(transaction)
+                                setIsSaleDetailsModalOpen(true)
+                              }}
+                            >
+                              <td className="py-3 px-4">
+                                <div className="flex items-center gap-2">
+                                  <Receipt className="h-4 w-4 text-[#0099b5]" />
+                                  <span className="font-mono text-sm">{transaction.receiptNumber}</span>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="text-sm">
+                                  <div className="font-medium text-gray-900">
+                                    {saleDate.toLocaleDateString("uz-UZ", {
+                                      day: "2-digit",
+                                      month: "2-digit",
+                                      year: "numeric",
+                                    })}
+                                  </div>
+                                  <div className="text-gray-500">
+                                    {saleDate.toLocaleTimeString("uz-UZ", {
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    })}
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="space-y-1">
+                                  {transaction.items.slice(0, 2).map((item, idx) => (
+                                    <div key={idx} className="text-sm">
+                                      <span className="font-medium text-gray-900">{item.GMName}</span>
+                                      <span className="text-gray-500 ml-2">
+                                        ({item.quantity} x ${item.price.toFixed(2)})
+                                      </span>
+                                    </div>
+                                  ))}
+                                  {transaction.items.length > 2 && (
+                                    <div className="text-sm text-gray-500">
+                                      +{transaction.items.length - 2} ta mahsulot
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 text-right">
+                                <span className="font-bold text-green-600 text-lg">
+                                  ${transaction.totalAmount.toLocaleString()}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4 text-center">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setReceiptData({
+                                      receiptNumber: transaction.receiptNumber,
+                                      items: transaction.items,
+                                      totalAmount: transaction.totalAmount,
+                                      date: saleDate,
+                                    })
+                                    setShowReceipt(true)
+                                  }}
+                                  className="text-[#0099b5] hover:bg-[#0099b5]/10"
+                                >
+                                  <Printer className="h-4 w-4 mr-1" />
+                                  Chek
+                                </Button>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
+
+              {filteredSales.length > 0 && (
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-4 pt-4 border-t">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600">Sahifada:</span>
+                    <Select
+                      value={salesPerPage.toString()}
+                      onValueChange={(value) => {
+                        setSalesPerPage(Number(value))
+                        setSalesPage(1)
+                      }}
+                    >
+                      <SelectTrigger className="w-[100px] h-9">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="10">10</SelectItem>
+                        <SelectItem value="20">20</SelectItem>
+                        <SelectItem value="50">50</SelectItem>
+                        <SelectItem value="100">100</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <span className="text-sm text-gray-600">
+                      {salesStartIndex + 1}-{Math.min(salesEndIndex, filteredSales.length)} / {filteredSales.length}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSalesPage(1)}
+                      disabled={salesPage === 1}
+                      className="h-9"
+                    >
+                      <ChevronsLeft className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSalesPage((prev) => Math.max(1, prev - 1))}
+                      disabled={salesPage === 1}
+                      className="h-9"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <span className="text-sm font-medium px-3">
+                      {salesPage} / {salesTotalPages}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSalesPage((prev) => Math.min(salesTotalPages, prev + 1))}
+                      disabled={salesPage === salesTotalPages}
+                      className="h-9"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSalesPage(salesTotalPages)}
+                      disabled={salesPage === salesTotalPages}
+                      className="h-9"
+                    >
+                      <ChevronsRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="loans" className="space-y-6">
+          {/* Loan Statistics */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">{t("loan.totalLoans")}</CardTitle>
+                <Wallet className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{loans.length}</div>
+                <p className="text-xs text-muted-foreground mt-1">Jami: ${totalLoanAmount.toLocaleString()}</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">{t("loan.pendingLoans")}</CardTitle>
+                <AlertCircle className="h-4 w-4 text-orange-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{pendingLoans.length}</div>
+                <p className="text-xs text-muted-foreground mt-1">To'lanishi kerak</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">{t("loan.paidLoans")}</CardTitle>
+                <CreditCard className="h-4 w-4 text-green-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{loans.filter((l) => l.status === "paid").length}</div>
+                <p className="text-xs text-muted-foreground mt-1">To'langan qarzlar</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Loan Filters */}
+          <Card>
+            <CardHeader>
+              <div className="flex flex-col gap-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>{t("loan.loanList")}</CardTitle>
+                    <CardDescription>Qarzga olganlar ro'yxati va to'lovlar</CardDescription>
+                  </div>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <Input
+                      placeholder="Mijoz ismi, telefon yoki eslatma bo'yicha qidirish..."
+                      value={loanSearchQuery}
+                      onChange={(e) => setLoanSearchQuery(e.target.value)}
+                      className="pl-9 h-10"
+                    />
+                  </div>
+                  <Select value={loanStatusFilter} onValueChange={setLoanStatusFilter}>
+                    <SelectTrigger className="w-full sm:w-[200px] h-10">
+                      <SelectValue placeholder={t("loan.filterStatus")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">{t("loan.allLoans")}</SelectItem>
+                      <SelectItem value="pending">{t("loan.status.pending")}</SelectItem>
+                      <SelectItem value="partial">{t("loan.status.partial")}</SelectItem>
+                      <SelectItem value="paid">{t("loan.status.paid")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {filteredLoans.length === 0 ? (
+                <div className="text-center py-12">
+                  <HandCoins className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                  <p className="text-muted-foreground">
+                    {loanSearchQuery ? "Qidiruv bo'yicha natija topilmadi" : t("loan.noLoans")}
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {renderLoansTable()}
+
+                  {/* Pagination */}
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-6 pt-4 border-t">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-gray-600">Sahifada:</span>
+                      <Select
+                        value={loansPerPage.toString()}
+                        onValueChange={(value) => {
+                          setLoansPerPage(Number(value))
+                          setLoansPage(1)
+                        }}
+                      >
+                        <SelectTrigger className="w-[100px] h-9">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="10">10</SelectItem>
+                          <SelectItem value="20">20</SelectItem>
+                          <SelectItem value="50">50</SelectItem>
+                          <SelectItem value="100">100</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <span className="text-sm text-gray-600">
+                        {loansStartIndex + 1}-{Math.min(loansEndIndex, filteredLoans.length)} / {filteredLoans.length}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setLoansPage((p) => Math.max(1, p - 1))}
+                        disabled={loansPage === 1}
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                      <span className="text-sm text-gray-600">
+                        Sahifa {loansPage} / {loansTotalPages}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setLoansPage((p) => Math.min(loansTotalPages, p + 1))}
+                        disabled={loansPage === loansTotalPages}
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="history" className="space-y-4 lg:space-y-6">
+          <Card className="border-0 shadow-lg">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
+                    <ShoppingCart className="h-4 w-4 lg:h-5 lg:w-5 text-[#0099b5]" />
+                    Sotilgan mahsulotlar tarixi
+                  </CardTitle>
+                  <CardDescription className="text-sm">Barcha sotuvlar va ularning tafsilotlari</CardDescription>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant={salesHistoryFilter === "all" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setSalesHistoryFilter("all")}
+                    className={salesHistoryFilter === "all" ? "bg-[#0099b5] hover:bg-[#0099b5]/90" : ""}
+                  >
+                    Barchasi
+                  </Button>
+                  <Button
+                    variant={salesHistoryFilter === "today" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setSalesHistoryFilter("today")}
+                    className={salesHistoryFilter === "today" ? "bg-[#0099b5] hover:bg-[#0099b5]/90" : ""}
+                  >
+                    Bugun
+                  </Button>
+                  <Button
+                    variant={salesHistoryFilter === "week" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setSalesHistoryFilter("week")}
+                    className={salesHistoryFilter === "week" ? "bg-[#0099b5] hover:bg-[#0099b5]/90" : ""}
+                  >
+                    7 kun
+                  </Button>
+                  <Button
+                    variant={salesHistoryFilter === "month" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setSalesHistoryFilter("month")}
+                    className={salesHistoryFilter === "month" ? "bg-[#0099b5] hover:bg-[#0099b5]/90" : ""}
+                  >
+                    30 kun
+                  </Button>
+                </div>
+              </div>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Input
+                  type="text"
+                  placeholder="Chek raqami yoki mahsulot nomi bo'yicha qidirish..."
+                  value={salesSearchQuery}
+                  onChange={(e) => setSalesSearchQuery(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+            </CardHeader>
+            <CardContent>
+              {/* Sales Statistics Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <Card className="bg-gradient-to-br from-blue-50 to-blue-100">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-blue-700 font-medium">Jami sotuvlar</p>
+                        <p className="text-2xl font-bold text-blue-900">{filteredSales.length}</p>
+                      </div>
+                      <div className="p-3 bg-blue-500 rounded-full">
+                        <Receipt className="h-6 w-6 text-white" />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-gradient-to-br from-green-50 to-green-100">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-green-700 font-medium">Jami summa</p>
+                        <p className="text-2xl font-bold text-green-900">${totalSalesAmount.toLocaleString()}</p>
+                      </div>
+                      <div className="p-3 bg-green-500 rounded-full">
+                        <DollarSign className="h-6 w-6 text-white" />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-gradient-to-br from-purple-50 to-purple-100">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-purple-700 font-medium">Sotilgan mahsulotlar</p>
+                        <p className="text-2xl font-bold text-purple-900">{totalItemsSold}</p>
+                      </div>
+                      <div className="p-3 bg-purple-500 rounded-full">
+                        <Package className="h-6 w-6 text-white" />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Sales History Table */}
+              <div className="border rounded-lg overflow-hidden">
+                <div className="max-h-[500px] overflow-y-auto">
+                  {filteredSales.length === 0 ? (
+                    <div className="p-8 text-center text-gray-500">
+                      <ShoppingCart className="h-12 w-12 mx-auto mb-3 text-gray-400" />
+                      <p>Hozircha sotuvlar yo'q</p>
+                    </div>
+                  ) : (
+                    <table className="w-full">
+                      <thead className="bg-gray-50 sticky top-0">
+                        <tr>
+                          <th className="text-left py-3 px-4 font-semibold text-gray-700 text-sm">Chek raqami</th>
+                          <th className="text-left py-3 px-4 font-semibold text-gray-700 text-sm">Sana va vaqt</th>
+                          <th className="text-left py-3 px-4 font-semibold text-gray-700 text-sm">Mahsulotlar</th>
+                          <th className="text-right py-3 px-4 font-semibold text-gray-700 text-sm">Jami summa</th>
+                          <th className="text-center py-3 px-4 font-semibold text-gray-700 text-sm">Amallar</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {paginatedSales.map((transaction) => {
+                          if (!transaction.saleDate) return null
+                          const saleDate = transaction.saleDate.toDate()
+                          return (
+                            <tr
+                              key={transaction.id}
+                              className="border-t hover:bg-gray-50 cursor-pointer"
+                              onClick={() => {
+                                setSelectedSale(transaction)
+                                setIsSaleDetailsModalOpen(true)
+                              }}
+                            >
+                              <td className="py-3 px-4">
+                                <div className="flex items-center gap-2">
+                                  <Receipt className="h-4 w-4 text-[#0099b5]" />
+                                  <span className="font-mono text-sm">{transaction.receiptNumber}</span>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="text-sm">
+                                  <div className="font-medium text-gray-900">
+                                    {saleDate.toLocaleDateString("uz-UZ", {
+                                      day: "2-digit",
+                                      month: "2-digit",
+                                      year: "numeric",
+                                    })}
+                                  </div>
+                                  <div className="text-gray-500">
+                                    {saleDate.toLocaleTimeString("uz-UZ", {
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    })}
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="space-y-1">
+                                  {transaction.items.slice(0, 2).map((item, idx) => (
+                                    <div key={idx} className="text-sm">
+                                      <span className="font-medium text-gray-900">{item.GMName}</span>
+                                      <span className="text-gray-500 ml-2">
+                                        ({item.quantity} x ${item.price.toFixed(2)})
+                                      </span>
+                                    </div>
+                                  ))}
+                                  {transaction.items.length > 2 && (
+                                    <div className="text-sm text-gray-500">
+                                      +{transaction.items.length - 2} ta mahsulot
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 text-right">
+                                <span className="font-bold text-green-600 text-lg">
+                                  ${transaction.totalAmount.toLocaleString()}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4 text-center">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setReceiptData({
+                                      receiptNumber: transaction.receiptNumber,
+                                      items: transaction.items,
+                                      totalAmount: transaction.totalAmount,
+                                      date: saleDate,
+                                    })
+                                    setShowReceipt(true)
+                                  }}
+                                  className="text-[#0099b5] hover:bg-[#0099b5]/10"
+                                >
+                                  <Printer className="h-4 w-4 mr-1" />
+                                  Chek
+                                </Button>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
+
+              {filteredSales.length > 0 && (
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-4 pt-4 border-t">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600">Sahifada:</span>
+                    <Select
+                      value={salesPerPage.toString()}
+                      onValueChange={(value) => {
+                        setSalesPerPage(Number(value))
+                        setSalesPage(1)
+                      }}
+                    >
+                      <SelectTrigger className="w-[100px] h-9">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="10">10</SelectItem>
+                        <SelectItem value="20">20</SelectItem>
+                        <SelectItem value="50">50</SelectItem>
+                        <SelectItem value="100">100</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <span className="text-sm text-gray-600">
+                      {salesStartIndex + 1}-{Math.min(salesEndIndex, filteredSales.length)} / {filteredSales.length}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSalesPage(1)}
+                      disabled={salesPage === 1}
+                      className="h-9"
+                    >
+                      <ChevronsLeft className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSalesPage((prev) => Math.max(1, prev - 1))}
+                      disabled={salesPage === 1}
+                      className="h-9"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <span className="text-sm font-medium px-3">
+                      {salesPage} / {salesTotalPages}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSalesPage((prev) => Math.min(salesTotalPages, prev + 1))}
+                      disabled={salesPage === salesTotalPages}
+                      className="h-9"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSalesPage(salesTotalPages)}
+                      disabled={salesPage === salesTotalPages}
+                      className="h-9"
+                    >
+                      <ChevronsRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
 
@@ -1906,7 +3238,7 @@ export default function GMPage() {
               {t("modal.GMDetails")}
             </DialogTitle>
             <DialogDescription>
-              {viewingGM?.tovar || viewingGM?.nomi} - {viewingGM?.kodi} {/* Use tovar */}
+              {viewingGM?.nomi} - {viewingGM?.kodi}
             </DialogDescription>
           </DialogHeader>
           {viewingGM && (
@@ -1924,14 +3256,8 @@ export default function GMPage() {
                       <span className="font-medium">{viewingGM.model || "-"}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">{t("tovar")}:</span> {/* Display Tovar */}
-                      <span className="font-medium">{viewingGM.tovar || "-"}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">{t("nomi")}:</span> {/* Display Nomi if different */}
-                      {viewingGM.nomi && viewingGM.nomi !== viewingGM.tovar && (
-                        <span className="font-medium">{viewingGM.nomi}</span>
-                      )}
+                      <span className="text-gray-600">{t("nomi")}:</span>
+                      <span className="font-medium">{viewingGM.nomi}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">{t("kompaniya")}:</span>
@@ -1999,10 +3325,6 @@ export default function GMPage() {
                       <span className="text-gray-600">{t("warehouse.dimensions")}:</span>
                       <span className="font-medium">{viewingGM.dimensions || "-"}</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">{t("olchBirligi")}:</span> {/* Display olchBirligi */}
-                      <span className="font-medium">{viewingGM.olchBirligi || "-"}</span>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -2038,18 +3360,11 @@ export default function GMPage() {
                       <div className="flex justify-between text-sm text-gray-600 mb-1">
                         <span>Stock Level</span>
                         <span>
-                          {viewingGM.maxStock && viewingGM.maxStock > 0
-                            ? Math.round(((viewingGM.stock || 0) / viewingGM.maxStock) * 100)
-                            : 0}
-                          %
+                          {Math.round(((viewingGM.stock || 0) / (viewingGM.maxStock || 1000)) * 100)}%
                         </span>
                       </div>
                       <Progress
-                        value={
-                          viewingGM.maxStock && viewingGM.maxStock > 0
-                            ? ((viewingGM.stock || 0) / viewingGM.maxStock) * 100
-                            : 0
-                        }
+                        value={((viewingGM.stock || 0) / (viewingGM.maxStock || 1000)) * 100}
                         className="h-2"
                       />
                     </div>
@@ -2139,21 +3454,21 @@ export default function GMPage() {
               {t(stockAction === "add" ? "modal.addStock" : "modal.removeStock")}
             </DialogTitle>
             <DialogDescription>
-              {stockGM?.tovar || stockGM?.nomi} - Current stock: {stockGM?.stock || 0} {/* Use tovar */}
+              {stockGM?.nomi} - Current stock: {stockGM?.stock || 0}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="p-4 bg-gray-50 rounded-lg">
               <div className="flex justify-between items-center mb-2">
                 <span className="text-sm text-gray-600">{t("GMName")}:</span>
-                <span className="font-medium">{stockGM?.tovar || stockGM?.nomi}</span> {/* Use tovar */}
+                <span className="font-medium">{stockGM?.nomi}</span>
               </div>
               <div className="flex justify-between items-center mb-2">
                 <span className="text-sm text-gray-600">Current Stock:</span>
                 <Badge className="bg-blue-100 text-blue-800">{stockGM?.stock || 0}</Badge>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-600">{t("warehouse.minStock")}:</span>
+                <span className="text-sm text-gray-600">Min Stock:</span>
                 <span className="font-medium">{stockGM?.minStock || 10}</span>
               </div>
             </div>
@@ -2224,7 +3539,7 @@ export default function GMPage() {
               <div key={GM.id} className="p-3 border border-orange-200 rounded-lg bg-orange-50">
                 <div className="flex justify-between items-center">
                   <div>
-                    <h4 className="font-medium text-gray-900">{GM.tovar || GM.nomi}</h4> {/* Use tovar */}
+                    <h4 className="font-medium text-gray-900">{GM.nomi}</h4>
                     <p className="text-sm text-gray-600">
                       {GM.kodi} - {GM.kompaniya}
                     </p>
@@ -2297,16 +3612,7 @@ export default function GMPage() {
               />
             </div>
             <div>
-              <Label htmlFor="edit-tovar">{t("tovar")} *</Label> {/* Updated Label */}
-              <Input
-                id="edit-tovar"
-                value={formData.tovar}
-                onChange={(e) => setFormData({ ...formData, tovar: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-nomi">{t("nomi")}</Label> {/* Nomi might be optional or secondary */}
+              <Label htmlFor="edit-nomi">{t("nomi")} *</Label>
               <Input
                 id="edit-nomi"
                 value={formData.nomi}
@@ -2428,15 +3734,6 @@ export default function GMPage() {
               />
             </div>
             <div>
-              <Label htmlFor="edit-olchBirligi">{t("olchBirligi")}</Label> {/* Updated field */}
-              <Input
-                id="edit-olchBirligi"
-                value={formData.olchBirligi}
-                onChange={(e) => setFormData({ ...formData, olchBirligi: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
               <Label htmlFor="edit-status">{t("warehouse.status")}</Label>
               <Select
                 value={formData.status}
@@ -2480,14 +3777,14 @@ export default function GMPage() {
           <DialogHeader>
             <DialogTitle>{t("sellGM")}</DialogTitle>
             <DialogDescription>
-              {t("sellGMDescription")} {sellingGM?.tovar || sellingGM?.nomi} {/* Use tovar */}
+              {t("sellGMDescription")} {sellingGM?.nomi}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="p-4 bg-gray-50 rounded-lg">
               <div className="flex justify-between items-center mb-2">
                 <span className="text-sm text-gray-600">{t("GMName")}:</span>
-                <span className="font-medium">{sellingGM?.tovar || sellingGM?.nomi}</span> {/* Use tovar */}
+                <span className="font-medium">{sellingGM?.nomi}</span>
               </div>
               <div className="flex justify-between items-center mb-2">
                 <span className="text-sm text-gray-600">{t("price")}:</span>
@@ -2513,7 +3810,7 @@ export default function GMPage() {
               <div className="flex justify-between items-center">
                 <span className="text-sm text-green-700">{t("totalAmount")}:</span>
                 <span className="font-bold text-green-800 text-lg">
-                  {(Number.parseFloat(sellingGM?.narxi?.replace(/,/g, "") || "0") * sellQuantity).toLocaleString()}
+                  {(Number.parseInt(sellingGM?.narxi?.replace(/,/g, "") || "0") * sellQuantity).toLocaleString()}
                 </span>
               </div>
             </div>
@@ -2543,8 +3840,7 @@ export default function GMPage() {
           <div className="p-4 bg-red-50 rounded-lg border border-red-200">
             <div className="flex justify-between items-center mb-2">
               <span className="text-sm text-red-700">{t("GMName")}:</span>
-              <span className="font-medium text-red-800">{deletingGM?.tovar || deletingGM?.nomi}</span>{" "}
-              {/* Use tovar */}
+              <span className="font-medium text-red-800">{deletingGM?.nomi}</span>
             </div>
             <div className="flex justify-between items-center mb-2">
               <span className="text-sm text-red-700">{t("kodi")}:</span>
@@ -2623,16 +3919,7 @@ export default function GMPage() {
               />
             </div>
             <div>
-              <Label htmlFor="tovar">{t("tovar")} *</Label> {/* Updated field */}
-              <Input
-                id="tovar"
-                value={formData.tovar}
-                onChange={(e) => setFormData({ ...formData, tovar: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
-              <Label htmlFor="nomi">{t("nomi")}</Label> {/* Nomi might be optional or secondary */}
+              <Label htmlFor="nomi">{t("nomi")} *</Label>
               <Input
                 id="nomi"
                 value={formData.nomi}
@@ -2754,15 +4041,6 @@ export default function GMPage() {
               />
             </div>
             <div>
-              <Label htmlFor="olchBirligi">{t("olchBirligi")}</Label> {/* Updated field */}
-              <Input
-                id="olchBirligi"
-                value={formData.olchBirligi}
-                onChange={(e) => setFormData({ ...formData, olchBirligi: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
               <Label htmlFor="status">{t("warehouse.status")}</Label>
               <Select
                 value={formData.status}
@@ -2801,31 +4079,458 @@ export default function GMPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Import Confirmation Dialog */}
-      <Dialog open={showImportDialog} onOpenChange={handleCancelImport}>
+      <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{t("data.confirmImport")}</DialogTitle>
+            <DialogTitle>{t("data.import")}</DialogTitle>
             <DialogDescription>
-              {importFile ? `Import ${importFile.name}?` : "Are you sure you want to import this file?"}
+              {importFile ? `${importFile.name} faylini import qilmoqchimisiz?` : ""} {/* Importing file? */}
             </DialogDescription>
           </DialogHeader>
-          {isImporting && (
+
+          {isUploading && (
             <div className="space-y-4 py-4">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">{t("data.importing")}</span>
+                <span className="text-sm font-medium">{t("data.importing")}</span> {/* Importing... */}
                 <span className="text-sm font-semibold text-[#0099b5]">{Math.round(uploadProgress)}%</span>
               </div>
               <Progress value={uploadProgress} className="h-2" />
             </div>
           )}
+
           <DialogFooter>
-            <Button variant="outline" onClick={handleCancelImport} disabled={isImporting}>
+            <Button variant="outline" onClick={handleCancelImport} disabled={isUploading}>
               {t("common.cancel")}
             </Button>
-            <Button onClick={handleConfirmImport} disabled={isImporting} className="bg-[#0099b5] hover:bg-[#0099b5]/90">
-              {isImporting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Upload className="h-4 w-4 mr-2" />}
+            <Button onClick={handleConfirmImport} disabled={isUploading} className="bg-[#0099b5] hover:bg-[#0099b5]/90">
+              {isUploading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Upload className="h-4 w-4 mr-2" />}
               {t("data.import")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isBulkSellModalOpen} onOpenChange={setIsBulkSellModalOpen}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{t("sellGM")}</DialogTitle>
+            <DialogDescription>Tanlangan mahsulotlarni sotish</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* Sale type selection */}
+            <div className="flex gap-4 p-4 bg-muted rounded-lg">
+              <Button
+                variant={!sellAsLoan ? "default" : "outline"}
+                onClick={() => setSellAsLoan(false)}
+                className="flex-1"
+              >
+                <DollarSign className="h-4 w-4 mr-2" />
+                {t("loan.sellAsCash")}
+              </Button>
+              <Button
+                variant={sellAsLoan ? "default" : "outline"}
+                onClick={() => setSellAsLoan(true)}
+                className="flex-1"
+              >
+                <HandCoins className="h-4 w-4 mr-2" />
+                {t("loan.sellAsLoan")}
+              </Button>
+            </div>
+
+            {/* Customer info for loans */}
+            {sellAsLoan && (
+              <Card className="border-primary">
+                <CardHeader>
+                  <CardTitle className="text-base">Mijoz ma'lumotlari</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <Label htmlFor="customerName">{t("loan.customerName")} *</Label>
+                    <Input
+                      id="customerName"
+                      value={loanCustomerData.customerName}
+                      onChange={(e) => setLoanCustomerData({ ...loanCustomerData, customerName: e.target.value })}
+                      placeholder="Mijoz ismini kiriting"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="customerPhone">{t("loan.customerPhone")}</Label>
+                    <Input
+                      id="customerPhone"
+                      value={loanCustomerData.customerPhone}
+                      onChange={(e) => setLoanCustomerData({ ...loanCustomerData, customerPhone: e.target.value })}
+                      placeholder="+998 90 123 45 67"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="customerAddress">{t("loan.customerAddress")}</Label>
+                    <Input
+                      id="customerAddress"
+                      value={loanCustomerData.customerAddress}
+                      onChange={(e) => setLoanCustomerData({ ...loanCustomerData, customerAddress: e.target.value })}
+                      placeholder="Manzil"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="dueDate">{t("loan.dueDate")}</Label>
+                    <Input
+                      id="dueDate"
+                      type="date"
+                      value={loanCustomerData.dueDate}
+                      onChange={(e) => setLoanCustomerData({ ...loanCustomerData, dueDate: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="notes">{t("loan.notes")}</Label>
+                    <Textarea
+                      id="notes"
+                      value={loanCustomerData.notes}
+                      onChange={(e) => setLoanCustomerData({ ...loanCustomerData, notes: e.target.value })}
+                      placeholder="Qo'shimcha eslatmalar"
+                      rows={3}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* GMs list */}
+            <div className="space-y-2">
+              {Array.from(selectedGMs)
+                .map((id) => data.find((p) => p.id === id))
+                .filter((p): p is GM => p !== undefined)
+                .map((GM) => (
+                  <div key={GM.id} className="flex items-center gap-4 p-3 border rounded-lg">
+                    <div className="flex-1">
+                      <p className="font-medium">{GM.nomi}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {GM.kodi} • {GM.kompaniya}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Label className="text-sm">Miqdor:</Label>
+                      <Input
+                        type="number"
+                        min="1"
+                        max={GM.stock || 0}
+                        value={bulkSellQuantities[GM.id!] || 1}
+                        onChange={(e) =>
+                          setBulkSellQuantities({
+                            ...bulkSellQuantities,
+                            [GM.id!]: Number.parseInt(e.target.value) || 1,
+                          })
+                        }
+                        className="w-20"
+                      />
+                    </div>
+                    <div className="text-right min-w-[100px]">
+                      <p className="font-semibold">
+                        $
+                        {(
+                          (Number.parseFloat(GM.narxi.replace(/[^\d.]/g, "")) || 0) *
+                          (bulkSellQuantities[GM.id!] || 1)
+                        ).toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+            </div>
+
+            {/* Total */}
+            <div className="flex justify-between items-center p-4 bg-primary/10 rounded-lg">
+              <span className="font-semibold text-lg">{t("totalAmount")}:</span>
+              <span className="font-bold text-2xl">
+                $
+                {Array.from(selectedGMs)
+                  .map((id) => data.find((p) => p.id === id))
+                  .filter((p): p is GM => p !== undefined)
+                  .reduce((sum, GM) => {
+                    const price = Number.parseFloat(GM.narxi.replace(/[^\d.]/g, "")) || 0
+                    const quantity = bulkSellQuantities[GM.id!] || 1
+                    return sum + price * quantity
+                  }, 0)
+                  .toLocaleString()}
+              </span>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsBulkSellModalOpen(false)}>
+              {t("cancel")}
+            </Button>
+            <Button onClick={handleBulkSell} disabled={isSubmitting}>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Yuklanmoqda...
+                </>
+              ) : (
+                <>
+                  <ShoppingCart className="mr-2 h-4 w-4" />
+                  {sellAsLoan ? t("loan.sellAsLoan") : t("confirmSale")}
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isLoanPaymentModalOpen} onOpenChange={setIsLoanPaymentModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("loan.addPayment")}</DialogTitle>
+            <DialogDescription>{selectedLoan?.customerName} uchun to'lov qo'shish</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="p-4 bg-muted rounded-lg space-y-2">
+              <div className="flex justify-between">
+                <span className="text-sm text-muted-foreground">{t("loan.totalAmount")}:</span>
+                <span className="font-semibold">${selectedLoan?.totalAmount.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-sm text-muted-foreground">{t("loan.amountPaid")}:</span>
+                <span className="font-semibold text-green-600">
+                  ${(selectedLoan?.amountPaid || 0).toLocaleString()}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-sm text-muted-foreground">{t("loan.amountRemaining")}:</span>
+                <span className="font-semibold text-orange-600">
+                  ${(selectedLoan?.amountRemaining || 0).toLocaleString()}
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <Label htmlFor="paymentAmount">{t("loan.paymentAmount")} *</Label>
+              <Input
+                id="paymentAmount"
+                type="number"
+                min="0"
+                max={selectedLoan?.amountRemaining || 0}
+                value={loanPaymentData.amount}
+                onChange={(e) => setLoanPaymentData({ ...loanPaymentData, amount: e.target.value })}
+                placeholder="0.00"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="paymentNote">{t("loan.paymentNote")}</Label>
+              <Textarea
+                id="paymentNote"
+                value={loanPaymentData.note}
+                onChange={(e) => setLoanPaymentData({ ...loanPaymentData, note: e.target.value })}
+                placeholder="Qo'shimcha izoh"
+                rows={3}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsLoanPaymentModalOpen(false)}>
+              {t("cancel")}
+            </Button>
+            <Button onClick={handleAddLoanPayment} disabled={isSubmitting}>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Yuklanmoqda...
+                </>
+              ) : (
+                <>
+                  <CreditCard className="mr-2 h-4 w-4" />
+                  To'lov qo'shish
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isLoanDetailsModalOpen} onOpenChange={setIsLoanDetailsModalOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{t("loan.viewDetails")}</DialogTitle>
+            <DialogDescription>{selectedLoan?.customerName}</DialogDescription>
+          </DialogHeader>
+
+          {selectedLoan && (
+            <div className="space-y-6">
+              {/* Customer Info */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Mijoz ma'lumotlari</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Ism:</span>
+                    <span className="font-medium">{selectedLoan.customerName}</span>
+                  </div>
+                  {selectedLoan.customerPhone && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Telefon:</span>
+                      <span className="font-medium">{selectedLoan.customerPhone}</span>
+                    </div>
+                  )}
+                  {selectedLoan.customerAddress && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Manzil:</span>
+                      <span className="font-medium">{selectedLoan.customerAddress}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Chek raqami:</span>
+                    <span className="font-medium">{selectedLoan.receiptNumber}</span>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Payment Info */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">To'lov ma'lumotlari</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">{t("loan.totalAmount")}:</span>
+                    <span className="font-semibold">${selectedLoan.totalAmount.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">{t("loan.amountPaid")}:</span>
+                    <span className="font-semibold text-green-600">
+                      ${(selectedLoan.amountPaid || 0).toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">{t("loan.amountRemaining")}:</span>
+                    <span className="font-semibold text-orange-600">
+                      ${(selectedLoan.amountRemaining || 0).toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">{t("loan.status")}:</span>
+                    <Badge
+                      variant={
+                        selectedLoan.status === "paid"
+                          ? "default"
+                          : selectedLoan.status === "partial"
+                            ? "secondary"
+                            : "destructive"
+                      }
+                    >
+                      {t(`loan.status.${selectedLoan.status}`)}
+                    </Badge>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Payment History */}
+              {selectedLoan.paymentHistory && selectedLoan.paymentHistory.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">{t("loan.paymentHistory")}</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {selectedLoan.paymentHistory.map((payment, index) => (
+                        <div key={index} className="flex justify-between items-start p-3 bg-muted rounded-lg">
+                          <div>
+                            <p className="font-semibold">${payment.amount.toLocaleString()}</p>
+                            <p className="text-sm text-muted-foreground">
+                              {payment.date?.toDate?.()?.toLocaleDateString("uz-UZ") || "N/A"}
+                            </p>
+                            {payment.note && <p className="text-sm text-muted-foreground mt-1">{payment.note}</p>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsLoanDetailsModalOpen(false)}>
+              Yopish
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Receipt Modal - Thermal Printer Design (XP 90) */}
+      <Dialog open={showReceipt} onOpenChange={setShowReceipt}>
+        <DialogContent className="max-w-[400px] p-0">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Chek</DialogTitle>
+          </DialogHeader>
+          {receiptData && (
+            <div className="receipt-container bg-white p-6 text-black" style={{ fontFamily: "monospace" }}>
+              <div className="text-center mb-4">
+                <h2 className="text-xl font-bold mb-1">SAVDO CHEKI</h2>
+                <p className="text-xs">Chek: {receiptData.receiptNumber}</p>
+                <p className="text-xs">
+                  {receiptData.date instanceof Date
+                    ? receiptData.date.toLocaleString("uz-UZ", {
+                        day: "2-digit",
+                        month: "2-digit",
+                        year: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })
+                    : receiptData.date}
+                </p>
+              </div>
+
+              <div className="border-t border-dashed border-gray-400 my-3"></div>
+
+              {/* GMs List */}
+              <div className="space-y-3 text-sm">
+                {receiptData.items.map((item: any, index: number) => (
+                  <div key={index} className="space-y-1">
+                    <div className="font-bold">{item.GMName}</div>
+                    <div className="text-xs space-y-0.5">
+                      <div>Kod: {item.GMCode}</div>
+                      <div>Model: {item.model || "N/A"}</div>
+                      {item.location && <div>Joy: {item.location}</div>}
+                      <div className="flex justify-between mt-1">
+                        <span>
+                          {item.quantity} x ${item.price.toFixed(2)}
+                        </span>
+                        <span className="font-semibold">${(item.quantity * item.price).toFixed(2)}</span>
+                      </div>
+                    </div>
+                    {index < receiptData.items.length - 1 && (
+                      <div className="border-t border-dotted border-gray-300 mt-2"></div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <div className="border-t border-dashed border-gray-400 my-3"></div>
+
+              {/* Total */}
+              <div className="flex justify-between text-lg font-bold">
+                <span>JAMI:</span>
+                <span>${receiptData.totalAmount.toLocaleString()}</span>
+              </div>
+
+              <div className="border-t border-dashed border-gray-400 my-3"></div>
+
+              <div className="text-center text-xs">
+                <p>Xaridingiz uchun rahmat!</p>
+              </div>
+            </div>
+          )}
+          <DialogFooter className="p-4 pt-0">
+            <Button variant="outline" onClick={() => setShowReceipt(false)} className="flex-1">
+              Yopish
+            </Button>
+            <Button onClick={printReceipt} className="bg-[#0099b5] hover:bg-[#0099b5]/90 flex-1">
+              <Printer className="h-4 w-4 mr-2" />
+              Chop etish
             </Button>
           </DialogFooter>
         </DialogContent>
