@@ -218,6 +218,7 @@ export default function DataPage() {
     dimensions: "",
     description: "",
     status: "active",
+    paymentType: "naqd" as "naqd" | "qarz",
   })
   const fileInputRef = useRef<HTMLInputElement>(null) // Declared fileInputRef
   const [isAddModalOpen, setIsAddModalOpen] = useState(false) // Declared isAddModalOpen state
@@ -456,11 +457,11 @@ export default function DataPage() {
           GMName: GM.nomi,
           GMCode: GM.kodi,
           company: GM.kompaniya,
-          model: product.model, 
+          model: GM.model, // Added model here
           quantity,
           price,
           total: price * quantity,
-          location: GM.location, // Add location to sale item
+          location: GM.location,
         })
       }
 
@@ -475,7 +476,6 @@ export default function DataPage() {
         date: new Date(),
       }
 
-      // Save transaction
       const transactionData: any = {
         items: saleItems,
         totalAmount,
@@ -485,7 +485,9 @@ export default function DataPage() {
         amountPaid: sellAsLoan ? 0 : totalAmount,
         amountRemaining: sellAsLoan ? totalAmount : 0,
       }
- if (sellAsLoan) {
+
+      // Only add loan fields if it's actually a loan
+      if (sellAsLoan) {
         transactionData.loanStatus = "pending"
       }
 
@@ -549,7 +551,15 @@ export default function DataPage() {
   }
 
   const printReceipt = () => {
-    window.print()
+    console.log("[v0] Starting print, receiptData:", receiptData)
+    setIsPrinting(true)
+    setTimeout(() => {
+      console.log("[v0] isPrinting set to true, calling window.print()")
+      const printElement = document.querySelector(".receipt-print-only")
+      console.log("[v0] Print element found:", printElement)
+      window.print()
+      setIsPrinting(false)
+    }, 100)
   }
 
   const handleCreate = async () => {
@@ -574,6 +584,7 @@ export default function DataPage() {
         dimensions: formData.dimensions,
         description: formData.description,
         status: formData.status,
+        paymentType: formData.paymentType,
         sold: 0,
       })
 
@@ -620,6 +631,7 @@ export default function DataPage() {
       dimensions: "",
       description: "",
       status: "active",
+      paymentType: "naqd",
     })
   }
 
@@ -643,6 +655,7 @@ export default function DataPage() {
       dimensions: row.dimensions || "",
       description: row.description || "",
       status: row.status || "active",
+      paymentType: row.paymentType || "naqd",
     })
     setIsEditModalOpen(true)
   }
@@ -671,6 +684,7 @@ export default function DataPage() {
         dimensions: formData.dimensions,
         description: formData.description,
         status: formData.status,
+        paymentType: formData.paymentType,
       })
 
       await loadGMs()
@@ -1223,7 +1237,7 @@ export default function DataPage() {
     const paidLoans = loans
       .filter((loan) => loan.status === "paid")
       .map((loan) => {
-        // Find the corresponding transaction to get items
+        // Find the corresponding transaction to get GM items
         const transaction = saleGMs.find((t) => t.id === loan.transactionId)
 
         return {
@@ -1543,7 +1557,7 @@ export default function DataPage() {
         <div>
           <h1 className="text-2xl lg:text-3xl font-bold text-gray-900 flex items-center gap-3">
             <Table className="h-8 w-8 text-[#0099b5]" />
-            GM
+            {t("sidebar.table")}
           </h1>
           <p className="text-sm text-gray-500 mt-1 flex items-center gap-2">
             <span className="font-medium text-gray-700">{t("data.manage")}</span>
@@ -1905,6 +1919,22 @@ export default function DataPage() {
                       </th>
                       <th
                         className="text-left py-4 px-6 font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors"
+                        onClick={() => handleColumnClick("paymentType")}
+                        title="MAXSULOT"
+                      >
+                        <div className="flex items-center gap-2">
+                          <DollarSign className="h-4 w-4" />
+                          MAXSULOT
+                          {sortColumn === "paymentType" &&
+                            (sortDirection === "asc" ? (
+                              <ChevronUp className="h-4 w-4" />
+                            ) : (
+                              <ChevronDown className="h-4 w-4" />
+                            ))}
+                        </div>
+                      </th>
+                      <th
+                        className="text-left py-4 px-6 font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors"
                         onClick={() => handleColumnClick("narxi")}
                         title={t("filter.narxi")}
                       >
@@ -2007,6 +2037,18 @@ export default function DataPage() {
                             <MapPin className="h-3 w-3" />
                             {row.location || "-"}
                           </div>
+                        </td>
+                        <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
+                          <Badge
+                            className={cn(
+                              "font-semibold",
+                              row.paymentType === "qarz"
+                                ? "bg-orange-100 text-orange-800 border-orange-200"
+                                : "bg-green-100 text-green-800 border-green-200",
+                            )}
+                          >
+                            {row.paymentType === "qarz" ? "Qarz" : "Naqd"}
+                          </Badge>
                         </td>
                         <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
                           <span className="font-semibold text-green-600 text-lg">{row.narxi}</span>
@@ -3634,6 +3676,21 @@ export default function DataPage() {
               />
             </div>
             <div>
+              <Label htmlFor="edit-paymentType">To'lov turi *</Label>
+              <Select
+                value={formData.paymentType}
+                onValueChange={(value: "naqd" | "qarz") => setFormData({ ...formData, paymentType: value })}
+              >
+                <SelectTrigger className="border-[#0099b5]/20">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="naqd">Naqd (Pul)</SelectItem>
+                  <SelectItem value="qarz">Qarz</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
               <Label htmlFor="edit-narxi">{t("narxi")} *</Label>
               <Input
                 id="edit-narxi"
@@ -3939,6 +3996,21 @@ export default function DataPage() {
                 onChange={(e) => setFormData({ ...formData, kompaniya: e.target.value })}
                 className="border-[#0099b5]/20 focus:border-[#0099b5]"
               />
+            </div>
+            <div>
+              <Label htmlFor="paymentType">To'lov turi *</Label>
+              <Select
+                value={formData.paymentType}
+                onValueChange={(value: "naqd" | "qarz") => setFormData({ ...formData, paymentType: value })}
+              >
+                <SelectTrigger className="border-[#0099b5]/20">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="naqd">Naqd (Pul)</SelectItem>
+                  <SelectItem value="qarz">Qarz</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div>
               <Label htmlFor="narxi">{t("narxi")} *</Label>
@@ -4464,7 +4536,6 @@ export default function DataPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Receipt Modal - Thermal Printer Design (XP 90) */}
       <Dialog open={showReceipt} onOpenChange={setShowReceipt}>
         <DialogContent className="max-w-[400px] p-0">
           <DialogHeader className="sr-only">
@@ -4495,15 +4566,15 @@ export default function DataPage() {
 
               <div className="border-t-2 border-dashed border-gray-800 my-3"></div>
 
-              {/* Products List */}
+              {/* GMs List */}
               <div className="space-y-4 text-sm">
                 {receiptData.items.map((item: any, index: number) => (
                   <div key={index} className="space-y-1">
-                    <div className="font-bold text-base">{item.productName}</div>
+                    <div className="font-bold text-base">{item.GMName}</div>
                     <div className="text-xs space-y-0.5 text-gray-700">
                       <div className="flex justify-between">
                         <span>Kod:</span>
-                        <span className="font-semibold">{item.productCode}</span>
+                        <span className="font-semibold">{item.GMCode}</span>
                       </div>
                       <div className="flex justify-between">
                         <span>Model:</span>
@@ -4538,7 +4609,6 @@ export default function DataPage() {
               </div>
 
               <div className="border-t-2 border-dashed border-gray-800 my-3"></div>
-
             </div>
           )}
           <DialogFooter className="p-4 pt-0">
@@ -4553,7 +4623,7 @@ export default function DataPage() {
         </DialogContent>
       </Dialog>
 
-      {receiptData  && (
+      {receiptData && (
         <div className="receipt-print-only">
           <div className="text-center mb-4">
             <h2 className="text-2xl font-bold mb-2">SAVDO CHEKI</h2>
@@ -4578,11 +4648,11 @@ export default function DataPage() {
           <div className="space-y-4 text-sm">
             {receiptData.items.map((item: any, index: number) => (
               <div key={index} className="space-y-1">
-                <div className="font-bold text-base">{item.productName}</div>
+                <div className="font-bold text-base">{item.GMName}</div>
                 <div className="text-xs space-y-0.5 text-gray-700">
                   <div className="flex justify-between">
                     <span>Kod:</span>
-                    <span className="font-semibold">{item.productCode}</span>
+                    <span className="font-semibold">{item.GMCode}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Model:</span>
@@ -4616,7 +4686,6 @@ export default function DataPage() {
           </div>
 
           <div className="border-t-2 border-dashed border-gray-800 my-3"></div>
-
         </div>
       )}
     </div>

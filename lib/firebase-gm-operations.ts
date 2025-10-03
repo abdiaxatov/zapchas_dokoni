@@ -24,6 +24,7 @@ export interface GM {
   description?: string // GM description
   status?: "active" | "inactive" | "discontinued" // GM status
   lastSold?: Timestamp // Last sale date
+  paymentType?: "naqd" | "qarz"
   lastRestocked?: Timestamp // Last restock date
   createdAt?: Timestamp
   updatedAt?: Timestamp
@@ -115,6 +116,7 @@ const loadStaticGMs = async (): Promise<GM[]> => {
       description: item.description,
       status: item.status || "active",
       isStatic: true,
+      paymentType: item.paymentType || "naqd",
     }))
   } catch (error) {
     console.error("Error loading static GMs:", error)
@@ -181,6 +183,7 @@ export const addGM = async (GM: Omit<GM, "id" | "createdAt" | "updatedAt">): Pro
       minStock: GM.minStock || 10,
       maxStock: GM.maxStock || 1000,
       status: GM.status || "active",
+      paymentType: GM.paymentType || "naqd",
       isDeleted: false,
       isStatic: false,
       createdAt: Timestamp.now(),

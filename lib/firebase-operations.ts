@@ -23,6 +23,7 @@ export interface Product {
   dimensions?: string // Dimensions (LxWxH)
   description?: string // Product description
   status?: "active" | "inactive" | "discontinued" // Product status
+  paymentType?: "naqd" | "qarz" // Payment type: naqd (cash) or qarz (credit)
   lastSold?: Timestamp // Last sale date
   lastRestocked?: Timestamp // Last restock date
   createdAt?: Timestamp
@@ -114,6 +115,7 @@ const loadStaticProducts = async (): Promise<Product[]> => {
       dimensions: item.dimensions,
       description: item.description,
       status: item.status || "active",
+      paymentType: item.paymentType || "naqd", // Default payment type is cash
       isStatic: true,
     }))
   } catch (error) {
@@ -181,6 +183,7 @@ export const addProduct = async (product: Omit<Product, "id" | "createdAt" | "up
       minStock: product.minStock || 10,
       maxStock: product.maxStock || 1000,
       status: product.status || "active",
+      paymentType: product.paymentType || "naqd", // Default payment type is cash
       isDeleted: false,
       isStatic: false,
       createdAt: Timestamp.now(),

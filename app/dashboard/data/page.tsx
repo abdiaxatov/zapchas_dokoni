@@ -218,6 +218,7 @@ export default function DataPage() {
     dimensions: "",
     description: "",
     status: "active",
+    paymentType: "naqd" as "naqd" | "qarz",
   })
   const fileInputRef = useRef<HTMLInputElement>(null) // Declared fileInputRef
   const [isAddModalOpen, setIsAddModalOpen] = useState(false) // Declared isAddModalOpen state
@@ -583,6 +584,7 @@ export default function DataPage() {
         dimensions: formData.dimensions,
         description: formData.description,
         status: formData.status,
+        paymentType: formData.paymentType,
         sold: 0,
       })
 
@@ -629,6 +631,7 @@ export default function DataPage() {
       dimensions: "",
       description: "",
       status: "active",
+      paymentType: "naqd",
     })
   }
 
@@ -652,6 +655,7 @@ export default function DataPage() {
       dimensions: row.dimensions || "",
       description: row.description || "",
       status: row.status || "active",
+      paymentType: row.paymentType || "naqd",
     })
     setIsEditModalOpen(true)
   }
@@ -680,6 +684,7 @@ export default function DataPage() {
         dimensions: formData.dimensions,
         description: formData.description,
         status: formData.status,
+        paymentType: formData.paymentType,
       })
 
       await loadProducts()
@@ -1914,6 +1919,22 @@ export default function DataPage() {
                       </th>
                       <th
                         className="text-left py-4 px-6 font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors"
+                        onClick={() => handleColumnClick("paymentType")}
+                        title="MAXSULOT"
+                      >
+                        <div className="flex items-center gap-2">
+                          <DollarSign className="h-4 w-4" />
+                          MAXSULOT
+                          {sortColumn === "paymentType" &&
+                            (sortDirection === "asc" ? (
+                              <ChevronUp className="h-4 w-4" />
+                            ) : (
+                              <ChevronDown className="h-4 w-4" />
+                            ))}
+                        </div>
+                      </th>
+                      <th
+                        className="text-left py-4 px-6 font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors"
                         onClick={() => handleColumnClick("narxi")}
                         title={t("filter.narxi")}
                       >
@@ -2016,6 +2037,18 @@ export default function DataPage() {
                             <MapPin className="h-3 w-3" />
                             {row.location || "-"}
                           </div>
+                        </td>
+                        <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
+                          <Badge
+                            className={cn(
+                              "font-semibold",
+                              row.paymentType === "qarz"
+                                ? "bg-orange-100 text-orange-800 border-orange-200"
+                                : "bg-green-100 text-green-800 border-green-200",
+                            )}
+                          >
+                            {row.paymentType === "qarz" ? "Qarz" : "Naqd"}
+                          </Badge>
                         </td>
                         <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
                           <span className="font-semibold text-green-600 text-lg">{row.narxi}</span>
@@ -3643,6 +3676,21 @@ export default function DataPage() {
               />
             </div>
             <div>
+              <Label htmlFor="edit-paymentType">To'lov turi *</Label>
+              <Select
+                value={formData.paymentType}
+                onValueChange={(value: "naqd" | "qarz") => setFormData({ ...formData, paymentType: value })}
+              >
+                <SelectTrigger className="border-[#0099b5]/20">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="naqd">Naqd (Pul)</SelectItem>
+                  <SelectItem value="qarz">Qarz</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
               <Label htmlFor="edit-narxi">{t("narxi")} *</Label>
               <Input
                 id="edit-narxi"
@@ -3948,6 +3996,21 @@ export default function DataPage() {
                 onChange={(e) => setFormData({ ...formData, kompaniya: e.target.value })}
                 className="border-[#0099b5]/20 focus:border-[#0099b5]"
               />
+            </div>
+            <div>
+              <Label htmlFor="paymentType">To'lov turi *</Label>
+              <Select
+                value={formData.paymentType}
+                onValueChange={(value: "naqd" | "qarz") => setFormData({ ...formData, paymentType: value })}
+              >
+                <SelectTrigger className="border-[#0099b5]/20">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="naqd">Naqd (Pul)</SelectItem>
+                  <SelectItem value="qarz">Qarz</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div>
               <Label htmlFor="narxi">{t("narxi")} *</Label>
@@ -4546,7 +4609,6 @@ export default function DataPage() {
               </div>
 
               <div className="border-t-2 border-dashed border-gray-800 my-3"></div>
-
             </div>
           )}
           <DialogFooter className="p-4 pt-0">
@@ -4561,7 +4623,7 @@ export default function DataPage() {
         </DialogContent>
       </Dialog>
 
-      {receiptData  && (
+      {receiptData && (
         <div className="receipt-print-only">
           <div className="text-center mb-4">
             <h2 className="text-2xl font-bold mb-2">SAVDO CHEKI</h2>
@@ -4624,7 +4686,6 @@ export default function DataPage() {
           </div>
 
           <div className="border-t-2 border-dashed border-gray-800 my-3"></div>
-
         </div>
       )}
     </div>
