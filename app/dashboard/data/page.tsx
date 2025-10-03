@@ -154,6 +154,7 @@ export default function DataPage() {
   const [isBulkSellModalOpen, setIsBulkSellModalOpen] = useState(false)
   const [bulkSellQuantities, setBulkSellQuantities] = useState<Record<string, number>>({})
   const [showReceipt, setShowReceipt] = useState(false)
+  const [isPrinting, setIsPrinting] = useState(false)
   const [receiptData, setReceiptData] = useState<any>(null)
   const [saleTransactions, setSaleTransactions] = useState<SaleTransaction[]>([])
   const [salesHistoryFilter, setSalesHistoryFilter] = useState<"all" | "today" | "week" | "month">("all")
@@ -455,10 +456,11 @@ export default function DataPage() {
           productName: product.nomi,
           productCode: product.kodi,
           company: product.kompaniya,
+          model: product.model, // Added model here
           quantity,
           price,
           total: price * quantity,
-          location: product.location, // Add location to sale item
+          location: product.location,
         })
       }
 
@@ -473,16 +475,19 @@ export default function DataPage() {
         date: new Date(),
       }
 
-      // Save transaction
-      const transactionData: Omit<SaleTransaction, "id" | "createdAt"> = {
+      const transactionData: any = {
         items: saleItems,
         totalAmount,
         receiptNumber,
         saleDate: Timestamp.now(),
         isLoan: sellAsLoan,
-        loanStatus: sellAsLoan ? "pending" : undefined,
         amountPaid: sellAsLoan ? 0 : totalAmount,
         amountRemaining: sellAsLoan ? totalAmount : 0,
+      }
+
+      // Only add loan fields if it's actually a loan
+      if (sellAsLoan) {
+        transactionData.loanStatus = "pending"
       }
 
       const transactionId = await saveSaleTransaction(transactionData)
@@ -545,7 +550,15 @@ export default function DataPage() {
   }
 
   const printReceipt = () => {
-    window.print()
+    console.log("[v0] Starting print, receiptData:", receiptData)
+    setIsPrinting(true)
+    setTimeout(() => {
+      console.log("[v0] isPrinting set to true, calling window.print()")
+      const printElement = document.querySelector(".receipt-print-only")
+      console.log("[v0] Print element found:", printElement)
+      window.print()
+      setIsPrinting(false)
+    }, 100)
   }
 
   const handleCreate = async () => {
@@ -1219,7 +1232,7 @@ export default function DataPage() {
     const paidLoans = loans
       .filter((loan) => loan.status === "paid")
       .map((loan) => {
-        // Find the corresponding transaction to get items
+        // Find the corresponding transaction to get product items
         const transaction = saleTransactions.find((t) => t.id === loan.transactionId)
 
         return {
@@ -4460,68 +4473,80 @@ export default function DataPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Receipt Modal - Thermal Printer Design (XP 90) */}
       <Dialog open={showReceipt} onOpenChange={setShowReceipt}>
         <DialogContent className="max-w-[400px] p-0">
           <DialogHeader className="sr-only">
             <DialogTitle>Chek</DialogTitle>
           </DialogHeader>
           {receiptData && (
-            <div className="receipt-container bg-white p-6 text-black" style={{ fontFamily: "monospace" }}>
+            <div
+              className="receipt-container bg-white p-6 text-black"
+              style={{ fontFamily: "monospace", fontSize: "14px" }}
+            >
               <div className="text-center mb-4">
-                <h2 className="text-xl font-bold mb-1">SAVDO CHEKI</h2>
-                <p className="text-xs">Chek: {receiptData.receiptNumber}</p>
-                <p className="text-xs">
-                  {receiptData.date instanceof Date
-                    ? receiptData.date.toLocaleString("uz-UZ", {
-                        day: "2-digit",
-                        month: "2-digit",
-                        year: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })
-                    : receiptData.date}
-                </p>
+                <h2 className="text-2xl font-bold mb-2">SAVDO CHEKI</h2>
+                <div className="text-xs space-y-1">
+                  <p className="font-semibold">Chek №: {receiptData.receiptNumber}</p>
+                  <p>
+                    {receiptData.date instanceof Date
+                      ? receiptData.date.toLocaleString("uz-UZ", {
+                          day: "2-digit",
+                          month: "2-digit",
+                          year: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })
+                      : receiptData.date}
+                  </p>
+                </div>
               </div>
 
-              <div className="border-t border-dashed border-gray-400 my-3"></div>
+              <div className="border-t-2 border-dashed border-gray-800 my-3"></div>
 
               {/* Products List */}
-              <div className="space-y-3 text-sm">
+              <div className="space-y-4 text-sm">
                 {receiptData.items.map((item: any, index: number) => (
                   <div key={index} className="space-y-1">
-                    <div className="font-bold">{item.productName}</div>
-                    <div className="text-xs space-y-0.5">
-                      <div>Kod: {item.productCode}</div>
-                      <div>Model: {item.model || "N/A"}</div>
-                      {item.location && <div>Joy: {item.location}</div>}
-                      <div className="flex justify-between mt-1">
-                        <span>
-                          {item.quantity} x ${item.price.toFixed(2)}
-                        </span>
-                        <span className="font-semibold">${(item.quantity * item.price).toFixed(2)}</span>
+                    <div className="font-bold text-base">{item.productName}</div>
+                    <div className="text-xs space-y-0.5 text-gray-700">
+                      <div className="flex justify-between">
+                        <span>Kod:</span>
+                        <span className="font-semibold">{item.productCode}</span>
                       </div>
+                      <div className="flex justify-between">
+                        <span>Model:</span>
+                        <span className="font-semibold">{item.model || "N/A"}</span>
+                      </div>
+                      {item.location && (
+                        <div className="flex justify-between">
+                          <span>Joylashuv:</span>
+                          <span className="font-semibold">{item.location}</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex justify-between mt-2 text-sm">
+                      <span>
+                        {item.quantity} dona x ${item.price.toFixed(2)}
+                      </span>
+                      <span className="font-bold">${(item.quantity * item.price).toFixed(2)}</span>
                     </div>
                     {index < receiptData.items.length - 1 && (
-                      <div className="border-t border-dotted border-gray-300 mt-2"></div>
+                      <div className="border-t border-dotted border-gray-400 mt-3"></div>
                     )}
                   </div>
                 ))}
               </div>
 
-              <div className="border-t border-dashed border-gray-400 my-3"></div>
+              <div className="border-t-2 border-dashed border-gray-800 my-4"></div>
 
               {/* Total */}
-              <div className="flex justify-between text-lg font-bold">
+              <div className="flex justify-between text-xl font-bold mb-4">
                 <span>JAMI:</span>
                 <span>${receiptData.totalAmount.toLocaleString()}</span>
               </div>
 
-              <div className="border-t border-dashed border-gray-400 my-3"></div>
+              <div className="border-t-2 border-dashed border-gray-800 my-3"></div>
 
-              <div className="text-center text-xs">
-                <p>Xaridingiz uchun rahmat!</p>
-              </div>
             </div>
           )}
           <DialogFooter className="p-4 pt-0">
@@ -4535,6 +4560,73 @@ export default function DataPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {receiptData  && (
+        <div className="receipt-print-only">
+          <div className="text-center mb-4">
+            <h2 className="text-2xl font-bold mb-2">SAVDO CHEKI</h2>
+            <div className="text-xs space-y-1">
+              <p className="font-semibold">Chek №: {receiptData.receiptNumber}</p>
+              <p>
+                {receiptData.date instanceof Date
+                  ? receiptData.date.toLocaleString("uz-UZ", {
+                      day: "2-digit",
+                      month: "2-digit",
+                      year: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })
+                  : receiptData.date}
+              </p>
+            </div>
+          </div>
+
+          <div className="border-t-2 border-dashed border-gray-800 my-3"></div>
+
+          <div className="space-y-4 text-sm">
+            {receiptData.items.map((item: any, index: number) => (
+              <div key={index} className="space-y-1">
+                <div className="font-bold text-base">{item.productName}</div>
+                <div className="text-xs space-y-0.5 text-gray-700">
+                  <div className="flex justify-between">
+                    <span>Kod:</span>
+                    <span className="font-semibold">{item.productCode}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Model:</span>
+                    <span className="font-semibold">{item.model || "N/A"}</span>
+                  </div>
+                  {item.location && (
+                    <div className="flex justify-between">
+                      <span>Joylashuv:</span>
+                      <span className="font-semibold">{item.location}</span>
+                    </div>
+                  )}
+                </div>
+                <div className="flex justify-between mt-2 text-sm">
+                  <span>
+                    {item.quantity} dona x ${item.price.toFixed(2)}
+                  </span>
+                  <span className="font-bold">${(item.quantity * item.price).toFixed(2)}</span>
+                </div>
+                {index < receiptData.items.length - 1 && (
+                  <div className="border-t border-dotted border-gray-400 mt-3"></div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="border-t-2 border-dashed border-gray-800 my-4"></div>
+
+          <div className="flex justify-between text-xl font-bold mb-4">
+            <span>JAMI:</span>
+            <span>${receiptData.totalAmount.toLocaleString()}</span>
+          </div>
+
+          <div className="border-t-2 border-dashed border-gray-800 my-3"></div>
+
+        </div>
+      )}
     </div>
   )
 }
