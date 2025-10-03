@@ -42,6 +42,8 @@ export interface SaleTransaction {
     quantity: number
     price: number
     total: number
+    model?: string // Added optional model field
+    location?: string // Added optional location field
   }>
   totalAmount: number
   receiptNumber: string
@@ -88,7 +90,7 @@ const removeUndefinedFields = <T extends Record<string, any>>(obj: T): Partial<T
 
 const COLLECTION_NAME = "products"
 const SALES_COLLECTION_NAME = "saleTransactions"
-const LOANS_COLLECTION_NAME = "loans1"
+const LOANS_COLLECTION_NAME = "loans"
 
 const loadStaticProducts = async (): Promise<Product[]> => {
   try {
@@ -539,8 +541,11 @@ export const deleteAllProducts = async (): Promise<void> => {
 
 export const saveSaleTransaction = async (transaction: Omit<SaleTransaction, "id" | "createdAt">): Promise<string> => {
   try {
+    const cleanedItems = transaction.items.map((item) => removeUndefinedFields(item))
+
     const cleanedTransaction = removeUndefinedFields({
       ...transaction,
+      items: cleanedItems,
       createdAt: Timestamp.now(),
     })
 
