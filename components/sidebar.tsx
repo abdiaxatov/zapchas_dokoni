@@ -41,7 +41,7 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
   const menuItems = [
     { icon: LayoutDashboard, label: t("sidebar.dashboard"), href: "/dashboard" },
     { icon: Table, label: t("sidebar.table"), href: "/dashboard/data" },
-    { icon: Database, label: "GM " + t("sidebar.table"), href: "/dashboard/gm" },
+    { icon: Database, label: "GM ", href: "/dashboard/gm" },
     { icon: Coins, label: t("sidebar.currency"), href: "/dashboard/currency" },
   ]
 

@@ -1713,7 +1713,7 @@ export default function DataPage() {
           </TabsTrigger>
           <TabsTrigger value="history" className="flex items-center gap-2 text-sm lg:text-base font-medium">
             <Receipt className="h-4 w-4" />
-            Tarix
+            {t("tabs.salesHistory")}
           </TabsTrigger>
         </TabsList>
 
@@ -2581,9 +2581,9 @@ export default function DataPage() {
                 <div>
                   <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
                     <ShoppingCart className="h-4 w-4 lg:h-5 lg:w-5 text-[#0099b5]" />
-                    Sotilgan mahsulotlar tarixi
+                    {t("stats.salesHistory")}
                   </CardTitle>
-                  <CardDescription className="text-sm">Barcha sotuvlar va ularning tafsilotlari</CardDescription>
+                  <CardDescription className="text-sm">{t("stats.salesHistoryDescription")}</CardDescription>
                 </div>
                 <div className="flex gap-2">
                   <Button

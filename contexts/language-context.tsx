@@ -18,6 +18,7 @@ const LanguageContext = createContext<LanguageContextType | undefined>(undefined
 const translations = {
   uzb: {
     // Login page
+    "tabs.salesHistory": "Sotuvlar Tarixi",
     "login.title": "Admin Panelga Kirish",
     "login.email": "Email manzil",
     "login.password": "Parol",
@@ -54,7 +55,7 @@ const translations = {
     // Sidebar
     "sidebar.dashboard": "Dashboard",
     "sidebar.users": "Foydalanuvchilar",
-    "sidebar.table": "Jadval",
+    "sidebar.table": "hyundai & kia",
     "sidebar.analytics": "Analitika",
     "sidebar.settings": "Sozlamalar",
     "sidebar.logout": "Chiqish",
@@ -384,6 +385,8 @@ const translations = {
   },
   kares: {
     // Login page
+    
+    "tabs.salesHistory": "판매 내역", 
     "login.title": "관리자 패널 로그인",
     "login.email": "이메일 주소",
     "login.password": "비밀번호",
@@ -421,7 +424,7 @@ const translations = {
     // Sidebar
     "sidebar.dashboard": "대시보드",
     "sidebar.users": "사용자",
-    "sidebar.table": "테이블",
+    "sidebar.table": "hyundai & kia",
     "sidebar.analytics": "분석",
     "sidebar.settings": "설정",
     "sidebar.logout": "로그아웃",
@@ -434,7 +437,7 @@ const translations = {
     "common.success": "성공",
     "common.cancel": "취소",
     "common.refresh": "새로고침",
-
+"filter.allCompanies": "반체 고정치",
     // 404 Page
     pageNotFound: "페이지를 찾을 수 없습니다",
     pageNotFoundDesc: "찾으시는 페이지가 존재하지 않거나 이동되었을 수 있습니다.",
