@@ -54,11 +54,12 @@ const translations = {
     // Sidebar
     "sidebar.dashboard": "Dashboard",
     "sidebar.users": "Foydalanuvchilar",
-    "sidebar.table": "hyundai & kia",
+    "sidebar.table": "Jadval",
     "sidebar.analytics": "Analitika",
     "sidebar.settings": "Sozlamalar",
     "sidebar.logout": "Chiqish",
     "sidebar.language": "Til",
+    "sidebar.currency": "Valyuta",
 
     // Common
     "common.loading": "Yuklanmoqda...",
@@ -371,6 +372,15 @@ const translations = {
     "loan.noLoans": "Qarzlar yo'q",
     "loan.filterStatus": "Holat bo'yicha filtrlash",
     "loan.allLoans": "Barcha qarzlar",
+
+    "currency.title": "Valyuta Konvertori",
+    "currency.description": "Dollar, So'm va Won o'rtasida konvertatsiya qiling",
+    "currency.exchangeRates": "Valyuta Kurslari",
+    "currency.setRates": "Valyuta kurslarini belgilang",
+    "currency.converter": "Valyuta Konvertori",
+    "currency.enterAmount": "Konvertatsiya qilish uchun miqdorni kiriting",
+    "currency.amountInDollars": "Dollar miqdori",
+    "currency.quickReference": "Tezkor Ma'lumot",
   },
   kares: {
     // Login page
@@ -411,11 +421,12 @@ const translations = {
     // Sidebar
     "sidebar.dashboard": "대시보드",
     "sidebar.users": "사용자",
-    "sidebar.table": "hyundai & kia",
+    "sidebar.table": "테이블",
     "sidebar.analytics": "분석",
     "sidebar.settings": "설정",
     "sidebar.logout": "로그아웃",
     "sidebar.language": "언어",
+    "sidebar.currency": "통화",
 
     // Common
     "common.loading": "로딩 중...",
@@ -727,6 +738,15 @@ const translations = {
     "loan.noLoans": "대출 없음",
     "loan.filterStatus": "상태별 필터",
     "loan.allLoans": "모든 대출",
+
+    "currency.title": "통화 변환기",
+    "currency.description": "달러, 숨, 원 간 변환",
+    "currency.exchangeRates": "환율",
+    "currency.setRates": "환율 설정",
+    "currency.converter": "통화 변환기",
+    "currency.enterAmount": "변환할 금액 입력",
+    "currency.amountInDollars": "달러 금액",
+    "currency.quickReference": "빠른 참조",
   },
 }
 

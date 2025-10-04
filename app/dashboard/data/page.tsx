@@ -1623,7 +1623,7 @@ export default function DataPage() {
             </div>
             <p className="text-xs lg:text-sm font-medium text-green-700">{t("totalSales")}</p>
             <p className="text-lg lg:text-2xl font-bold text-green-900">
-              {data.reduce((sum, product) => sum + (product.sold || 0), 0).toLocaleString()}
+            <p className="text-2xl font-bold text-blue-900">{filteredSales.length}</p>
             </p>
           </CardContent>
         </Card>
@@ -1634,7 +1634,7 @@ export default function DataPage() {
               <DollarSign className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
             </div>
             <p className="text-xs lg:text-sm font-medium text-purple-700">{t("totalRevenue")}</p>
-            <p className="text-lg lg:text-2xl font-bold text-purple-900">${totalRevenue.toLocaleString()}</p>
+            <p className="text-lg lg:text-2xl font-bold text-purple-900">${totalSalesAmount.toLocaleString()}</p>
           </CardContent>
         </Card>
 

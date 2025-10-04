@@ -4,18 +4,7 @@ import { useLanguage } from "@/contexts/language-context"
 import { useToast } from "@/components/ui/toast"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import {
-  LayoutDashboard,
-  Users,
-  BarChart3,
-  Settings,
-  LogOut,
-  Globe,
-  X,
-  ChevronLeft,
-  Table,
-  Database,
-} from "lucide-react"
+import { LayoutDashboard, LogOut, Globe, X, ChevronLeft, Table, Database, Coins } from "lucide-react"
 import { useRouter, usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 
@@ -52,7 +41,8 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
   const menuItems = [
     { icon: LayoutDashboard, label: t("sidebar.dashboard"), href: "/dashboard" },
     { icon: Table, label: t("sidebar.table"), href: "/dashboard/data" },
-    { icon: Database, label: "GM ", href: "/dashboard/gm" },
+    { icon: Database, label: "GM " + t("sidebar.table"), href: "/dashboard/gm" },
+    { icon: Coins, label: t("sidebar.currency"), href: "/dashboard/currency" },
   ]
 
   return (
@@ -130,7 +120,6 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                 {isActive && isCollapsed && (
                   <div className="absolute -right-1 top-1/2 transform -translate-y-1/2 w-2 h-2 bg-[#0099b5] rounded-full hidden lg:block" />
                 )}
-
               </Button>
             )
           })}
