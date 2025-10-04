@@ -1634,7 +1634,7 @@ export default function DataPage() {
               <DollarSign className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
             </div>
             <p className="text-xs lg:text-sm font-medium text-purple-700">{t("totalRevenue")}</p>
-            <p className="text-lg lg:text-2xl font-bold text-purple-900">${totalSalesAmount.toLocaleString()}</p>
+            <p className="text-lg lg:text-2xl font-bold text-purple-900">${totalRevenue.toLocaleString()}</p>
           </CardContent>
         </Card>
 
@@ -2653,7 +2653,7 @@ export default function DataPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-green-700 font-medium">Jami summa</p>
-                        <p className="text-2xl font-bold text-green-900">${totalSalesAmount.toLocaleString()}</p>
+                        <p className="text-2xl font-bold text-green-900">${totalRevenue.toLocaleString()}</p>
                       </div>
                       <div className="p-3 bg-green-500 rounded-full">
                         <DollarSign className="h-6 w-6 text-white" />
@@ -3072,7 +3072,7 @@ export default function DataPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-green-700 font-medium">Jami summa</p>
-                        <p className="text-2xl font-bold text-green-900">${totalSalesAmount.toLocaleString()}</p>
+                        <p className="text-2xl font-bold text-green-900">${totalRevenue.toLocaleString()}</p>
                       </div>
                       <div className="p-3 bg-green-500 rounded-full">
                         <DollarSign className="h-6 w-6 text-white" />
