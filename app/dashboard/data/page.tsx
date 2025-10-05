@@ -219,9 +219,15 @@ export default function DataPage() {
     description: "",
     status: "active",
     paymentType: "naqd" as "naqd" | "qarz",
+    debtQuantity: "",
+    debtPrice: "",
   })
   const fileInputRef = useRef<HTMLInputElement>(null) // Declared fileInputRef
   const [isAddModalOpen, setIsAddModalOpen] = useState(false) // Declared isAddModalOpen state
+
+  const [exchangeRate, setExchangeRate] = useState(12500) // Default: 1 USD = 12500 UZS
+  const [showExchangeRateModal, setShowExchangeRateModal] = useState(false)
+  const [tempExchangeRate, setTempExchangeRate] = useState("12500")
 
   useEffect(() => {
     if (!loading && !user) {
@@ -585,6 +591,9 @@ export default function DataPage() {
         description: formData.description,
         status: formData.status,
         paymentType: formData.paymentType,
+        // Add debtQuantity and debtPrice if paymentType is 'qarz'
+        debtQuantity: formData.paymentType === "qarz" ? Number.parseInt(formData.debtQuantity) || 0 : undefined,
+        debtPrice: formData.paymentType === "qarz" ? Number.parseFloat(formData.debtPrice) || 0 : undefined,
         sold: 0,
       })
 
@@ -632,6 +641,9 @@ export default function DataPage() {
       description: "",
       status: "active",
       paymentType: "naqd",
+      // Reset debt fields
+      debtQuantity: "",
+      debtPrice: "",
     })
   }
 
@@ -656,6 +668,9 @@ export default function DataPage() {
       description: row.description || "",
       status: row.status || "active",
       paymentType: row.paymentType || "naqd",
+      // Initialize debt fields from existing product data
+      debtQuantity: row.debtQuantity ? row.debtQuantity.toString() : "",
+      debtPrice: row.debtPrice ? row.debtPrice.toString() : "",
     })
     setIsEditModalOpen(true)
   }
@@ -685,6 +700,9 @@ export default function DataPage() {
         description: formData.description,
         status: formData.status,
         paymentType: formData.paymentType,
+        // Update debtQuantity and debtPrice if paymentType is 'qarz'
+        debtQuantity: formData.paymentType === "qarz" ? Number.parseInt(formData.debtQuantity) || 0 : undefined,
+        debtPrice: formData.paymentType === "qarz" ? Number.parseFloat(formData.debtPrice) || 0 : undefined,
       })
 
       await loadProducts()
@@ -990,6 +1008,9 @@ export default function DataPage() {
       WEIGHT: product.weight || 0,
       DIMENSIONS: product.dimensions || "",
       DESCRIPTION: product.description || "",
+      // Include debtQuantity and debtPrice in export
+      DEBT_QUANTITY: product.debtQuantity || 0,
+      DEBT_PRICE: product.debtPrice || 0,
     }))
 
     const ws = XLSX.utils.json_to_sheet(exportData)
@@ -1550,22 +1571,42 @@ export default function DataPage() {
     )
   }
 
+  const handleUpdateExchangeRate = () => {
+    const rate = Number.parseFloat(tempExchangeRate)
+    if (!isNaN(rate) && rate > 0) {
+      setExchangeRate(rate)
+      setShowExchangeRateModal(false)
+      showToast({
+        title: "Muvaffaqiyatli",
+        description: `Valyuta kursi yangilandi: 1$ = ${rate.toLocaleString()} so'm`,
+        variant: "success",
+      })
+    } else {
+      showToast({
+        title: "Xatolik",
+        description: "Iltimos, to'g'ri qiymat kiriting",
+        variant: "destructive",
+      })
+    }
+  }
+
   return (
     <div className="space-y-6 p-4 lg:p-6">
       {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl lg:text-3xl font-bold text-gray-900 flex items-center gap-3">
-            <Table className="h-8 w-8 text-[#0099b5]" />
-            {t("sidebar.table")}
-          </h1>
-          <p className="text-sm text-gray-500 mt-1 flex items-center gap-2">
-            <span className="font-medium text-gray-700">{t("data.manage")}</span>
-            <span className="text-gray-400">•</span>
-            <span className="text-gray-600">{user?.email}</span>
-          </p>
+      {/* Modified header to include currency exchange rate button */}
+      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between mb-6">
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">{t("data")}</h1>
+          <Button
+            onClick={() => setShowExchangeRateModal(true)}
+            variant="outline"
+            size="sm"
+            className="flex items-center gap-2 border-blue-300 text-blue-700 hover:bg-blue-50"
+          >
+            <DollarSign className="h-4 w-4" />
+            <span className="text-sm">1$ = {exchangeRate.toLocaleString()} so'm</span>
+          </Button>
         </div>
-
         <div className="flex flex-wrap items-center gap-2">
           <Button
             onClick={handleRefresh}
@@ -1612,7 +1653,7 @@ export default function DataPage() {
               <Package className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
             </div>
             <p className="text-xs lg:text-sm font-medium text-blue-700">{t("totalProducts")}</p>
-            <p className="text-lg lg:text-2xl font-bold text-blue-900">{data.length.toLocaleString()}</p>
+            <div className="text-lg lg:text-2xl font-bold text-blue-900">{data.length.toLocaleString()}</div>
           </CardContent>
         </Card>
 
@@ -1622,9 +1663,9 @@ export default function DataPage() {
               <TrendingUp className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
             </div>
             <p className="text-xs lg:text-sm font-medium text-green-700">{t("totalSales")}</p>
-            <p className="text-lg lg:text-2xl font-bold text-green-900">
-            <p className="text-2xl font-bold text-blue-900">{filteredSales.length}</p>
-            </p>
+            <div className="text-lg lg:text-2xl font-bold text-green-900">
+              <span className="text-2xl font-bold text-blue-900">{filteredSales.length}</span>
+            </div>
           </CardContent>
         </Card>
 
@@ -1634,7 +1675,7 @@ export default function DataPage() {
               <DollarSign className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
             </div>
             <p className="text-xs lg:text-sm font-medium text-purple-700">{t("totalRevenue")}</p>
-            <p className="text-lg lg:text-2xl font-bold text-purple-900">${totalRevenue.toLocaleString()}</p>
+            <div className="text-lg lg:text-2xl font-bold text-purple-900">${totalRevenue.toLocaleString()}</div>
           </CardContent>
         </Card>
 
@@ -1644,7 +1685,7 @@ export default function DataPage() {
               <AlertTriangle className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
             </div>
             <p className="text-xs lg:text-sm font-medium text-orange-700">{t("lowStock")}</p>
-            <p className="text-lg lg:text-2xl font-bold text-orange-900">{currentLowStockProducts.length}</p>
+            <div className="text-lg lg:text-2xl font-bold text-orange-900">{currentLowStockProducts.length}</div>
           </CardContent>
         </Card>
       </div>
@@ -2039,19 +2080,42 @@ export default function DataPage() {
                           </div>
                         </td>
                         <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
-                          <Badge
-                            className={cn(
-                              "font-semibold",
-                              row.paymentType === "qarz"
-                                ? "bg-orange-100 text-orange-800 border-orange-200"
-                                : "bg-green-100 text-green-800 border-green-200",
+                          <div className="flex flex-col gap-1">
+                            <Badge
+                              className={cn(
+                                "font-semibold",
+                                row.paymentType === "qarz"
+                                  ? "bg-orange-100 text-orange-800 border-orange-200"
+                                  : "bg-green-100 text-green-800 border-green-200",
+                              )}
+                            >
+                              {row.paymentType === "qarz" ? "Qarz" : "Naqd"}
+                            </Badge>
+                            {row.paymentType === "qarz" && (row.debtQuantity || row.debtPrice) && (
+                              <div className="text-xs text-orange-700 space-y-0.5 mt-1">
+                                {row.debtQuantity && (
+                                  <div className="flex items-center gap-1">
+                                    <Package className="h-3 w-3" />
+                                    <span>{row.debtQuantity} dona</span>
+                                  </div>
+                                )}
+                                {row.debtPrice && (
+                                  <div className="flex items-center gap-1">
+                                    <DollarSign className="h-3 w-3" />
+                                    <span>{row.debtPrice} sum</span>
+                                  </div>
+                                )}
+                              </div>
                             )}
-                          >
-                            {row.paymentType === "qarz" ? "Qarz" : "Naqd"}
-                          </Badge>
+                          </div>
                         </td>
                         <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
-                          <span className="font-semibold text-green-600 text-lg">{row.narxi}</span>
+                          <div className="flex flex-col gap-1">
+                            <span className="font-semibold text-green-600 text-lg">${row.narxi}</span>
+                            <span className="text-sm text-gray-500">
+                              {(Number.parseFloat(row.narxi || "0") * exchangeRate).toLocaleString()} so'm
+                            </span>
+                          </div>
                         </td>
                         <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
                           <Badge
@@ -2689,11 +2753,21 @@ export default function DataPage() {
                     <table className="w-full">
                       <thead className="bg-gray-50 sticky top-0">
                         <tr>
-                          <th className="text-left py-3 px-4 font-semibold text-gray-700 text-sm">Chek raqami</th>
-                          <th className="text-left py-3 px-4 font-semibold text-gray-700 text-sm">Sana va vaqt</th>
-                          <th className="text-left py-3 px-4 font-semibold text-gray-700 text-sm">Mahsulotlar</th>
-                          <th className="text-right py-3 px-4 font-semibold text-gray-700 text-sm">Jami summa</th>
-                          <th className="text-center py-3 px-4 font-semibold text-gray-700 text-sm">Amallar</th>
+                          <th className="text-left py-3 px-4 font-semibold text-gray-700 text-sm">
+                            Chek raqami
+                          </th>
+                          <th className="text-left py-3 px-4 font-semibold text-gray-700 text-sm">
+                            Sana va vaqt
+                          </th>
+                          <th className="text-left py-3 px-4 font-semibold text-gray-700 text-sm">
+                            Mahsulotlar
+                          </th>
+                          <th className="text-right py-3 px-4 font-semibold text-gray-700 text-sm">
+                            Jami summa
+                          </th>
+                          <th className="text-center py-3 px-4 font-semibold text-gray-700 text-sm">
+                            Amallar
+                          </th>
                         </tr>
                       </thead>
                       <tbody>
