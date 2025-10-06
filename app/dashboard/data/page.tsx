@@ -529,7 +529,7 @@ export default function DataPage() {
       setIsBulkSellModalOpen(false)
       setSelectedProducts(new Set())
       setBulkSellQuantities({})
-      // setSellAsLoan(false)
+      setSellAsLoan(false)
       setLoanCustomerData({
         customerName: "",
         customerPhone: "",
