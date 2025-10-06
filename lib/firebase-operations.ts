@@ -30,6 +30,8 @@ export interface Product {
   updatedAt?: Timestamp
   isDeleted?: boolean // Soft delete flag
   isStatic?: boolean // Flag to identify static data
+  debtPrice?: string // Debt price if sold on credit
+  debtQuantity?: number // Quantity sold on credit
 }
 
 export interface SaleTransaction {
