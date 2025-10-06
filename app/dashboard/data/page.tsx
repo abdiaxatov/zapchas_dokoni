@@ -529,7 +529,7 @@ export default function DataPage() {
       setIsBulkSellModalOpen(false)
       setSelectedProducts(new Set())
       setBulkSellQuantities({})
-      setSellAsLoan(false)
+      // setSellAsLoan(false)
       setLoanCustomerData({
         customerName: "",
         customerPhone: "",
@@ -589,11 +589,13 @@ export default function DataPage() {
         weight: Number.parseFloat(formData.weight) || 0,
         dimensions: formData.dimensions,
         description: formData.description,
-        status: formData.status,
+        status: ["active", "inactive", "discontinued"].includes(formData.status)
+          ? (formData.status as "active" | "inactive" | "discontinued")
+          : undefined,
         paymentType: formData.paymentType,
         // Add debtQuantity and debtPrice if paymentType is 'qarz'
         debtQuantity: formData.paymentType === "qarz" ? Number.parseInt(formData.debtQuantity) || 0 : undefined,
-        debtPrice: formData.paymentType === "qarz" ? Number.parseFloat(formData.debtPrice) || 0 : undefined,
+        debtPrice: formData.paymentType === "qarz" ? (Number.parseFloat(formData.debtPrice) || 0).toString() : undefined,
         sold: 0,
       })
 
@@ -1598,7 +1600,7 @@ export default function DataPage() {
             {/* Modified header to include currency exchange rate button */}
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">{t("data")}</h1>
+          <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">hyundai & kia</h1>
           <Button
             onClick={() => setShowExchangeRateModal(true)}
             variant="outline"
@@ -3146,7 +3148,7 @@ export default function DataPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-green-700 font-medium">Jami summa</p>
-                        <p className="text-2xl font-bold text-green-900">${totalRevenue.toLocaleString()}</p>
+                        <p className="text-2xl font-bold text-green-900">${filteredSales.reduce((acc, sale) => acc + sale.totalAmount, 0).toLocaleString()}</p>
                       </div>
                       <div className="p-3 bg-green-500 rounded-full">
                         <DollarSign className="h-6 w-6 text-white" />
@@ -3985,11 +3987,8 @@ export default function DataPage() {
               {t("cancel")}
             </Button>
             <Button onClick={confirmSell} className="bg-green-600 hover:bg-green-700" disabled={isSubmitting}>
-              {isSubmitting ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
+
                 <ShoppingCart className="h-4 w-4 mr-2" />
-              )}
               {t("confirmSale")}
             </Button>
           </DialogFooter>
@@ -4470,17 +4469,8 @@ export default function DataPage() {
               {t("cancel")}
             </Button>
             <Button onClick={handleBulkSell} disabled={isSubmitting}>
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Yuklanmoqda...
-                </>
-              ) : (
-                <>
                   <ShoppingCart className="mr-2 h-4 w-4" />
                   {sellAsLoan ? t("loan.sellAsLoan") : t("confirmSale")}
-                </>
-              )}
             </Button>
           </DialogFooter>
         </DialogContent>
