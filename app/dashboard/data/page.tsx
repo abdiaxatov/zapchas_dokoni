@@ -632,6 +632,9 @@ export default function DataPage() {
       setIsSubmitting(false)
     }
   }
+const totalDebtProducts = data
+  .filter((product) => product.paymentType === "qarz")
+  .reduce((sum, product) => sum + (Number(product.debtQuantity) || 0), 0)
 
   const resetFormData = () => {
     setFormData({
@@ -1398,52 +1401,52 @@ export default function DataPage() {
     })
   }
 
-  const handleAddLoanPayment = async () => {
-    if (!selectedLoan) return
+const handleAddLoanPayment = async () => {
+  if (!selectedLoan) return
 
-    try {
-      const amount = Number.parseFloat(loanPaymentData.amount)
-      if (isNaN(amount) || amount <= 0) {
-        showToast({
-          title: t("common.error"),
-          description: "To'g'ri summa kiriting",
-          variant: "destructive",
-        })
-        return
-      }
-
-      if (amount > (selectedLoan.amountRemaining || 0)) {
-        showToast({
-          title: t("common.error"),
-          description: "Summa qolgan qarzdan ko'p bo'lmasligi kerak",
-          variant: "destructive",
-        })
-        return
-      }
-
-      await addLoanPayment(selectedLoan.id!, amount, loanPaymentData.note)
-
+  try {
+    const amount = Number.parseFloat(loanPaymentData.amount)
+    if (isNaN(amount) || amount <= 0) {
       showToast({
-        title: t("common.success"),
-        description: t("loan.paymentSuccess"),
-        variant: "success",
-      })
-
-      setIsLoanPaymentModalOpen(false)
-      setLoanPaymentData({ amount: "", note: "" })
-      setSelectedLoan(null)
-      await loadLoans()
-      await loadPendingLoans()
-      await loadTotalLoanAmount()
-    } catch (error) {
-      console.error("Error adding loan payment:", error)
-      showToast({
-        title: t("common.error"),
-        description: "To'lovni qo'shishda xatolik yuz berdi",
+        title: "Hato",
+        description: "To'g'ri summa kiriting",
         variant: "destructive",
       })
+      return
     }
+
+    if (amount > (selectedLoan.amountRemaining || 0)) {
+      showToast({
+        title: "Hato",
+        description: "Kiritilgan summa qolgan qarzdan ko'p bo'lmasligi kerak!",
+        variant: "destructive",
+      })
+      return
+    }
+
+    await addLoanPayment(selectedLoan.id!, amount, loanPaymentData.note)
+
+    showToast({
+      title: t("common.success"),
+      description: t("loan.paymentSuccess"),
+      variant: "success",
+    })
+
+    setIsLoanPaymentModalOpen(false)
+    setLoanPaymentData({ amount: "", note: "" })
+    setSelectedLoan(null)
+    await loadLoans()
+    await loadPendingLoans()
+    await loadTotalLoanAmount()
+  } catch (error) {
+    console.error("Error adding loan payment:", error)
+    showToast({
+      title: "Hato",
+      description: "To'lovni qo'shishda xatolik yuz berdi",
+      variant: "destructive",
+    })
   }
+}
 
   // Render function for the loans table with product details
   const renderLoansTable = () => {
@@ -1582,7 +1585,9 @@ export default function DataPage() {
       </div>
     )
   }
-
+const totalDebtSum = data
+  .filter((product) => product.paymentType === "qarz")
+  .reduce((sum, product) => sum + (Number(product.debtPrice) || 0), 0)
 
 // 2. Kursni yangilash va localStorage-ga saqlash
 const handleUpdateExchangeRate = () => {
@@ -1610,7 +1615,7 @@ const handleUpdateExchangeRate = () => {
   return (
     <div className="space-y-6 p-4 lg:p-6">
       {/* Header */}
-      
+   
             {/* Modified header to include currency exchange rate button */}
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between mb-6">
         <div className="flex items-center gap-3">
@@ -1672,16 +1677,18 @@ const handleUpdateExchangeRate = () => {
 
       {/* Statistics Overview Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-6">
-        <Card className="border-0 shadow-lg bg-gradient-to-br from-blue-50 to-blue-100 hover:shadow-xl transition-all duration-300">
-          <CardContent className="p-3 lg:p-6 text-center">
-            <div className="p-2 lg:p-3 bg-blue-500 rounded-full w-fit mx-auto mb-2 lg:mb-4">
-              <Package className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
-            </div>
-            <p className="text-xs lg:text-sm font-medium text-blue-700">{t("totalProducts")}</p>
-            <p className="text-lg lg:text-2xl font-bold text-blue-900">{data.length.toLocaleString()}</p>
-          </CardContent>
-        </Card>
+      
+   <Card className="border-0 shadow-lg bg-gradient-to-br from-orange-50 to-orange-100 hover:shadow-xl transition-all duration-300">
+  <CardContent className="p-3 lg:p-6 text-center">
+    <div className="p-2 lg:p-3 bg-orange-500 rounded-full w-fit mx-auto mb-2 lg:mb-4">
+      <HandCoins className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
+    </div>
+    <p className="text-xs lg:text-sm font-medium text-orange-700"> Jami qarz summa</p>
+<p className=" text-lg lg:text-2xl font-bold text-orange-900">{totalDebtSum.toLocaleString()} $</p>
+    <p className="text-xs text-orange-700 mt-1">Qarzga olingan mahsulotlar:{totalDebtProducts.toLocaleString()}</p>
 
+  </CardContent>
+</Card>
         <Card className="border-0 shadow-lg bg-gradient-to-br from-green-50 to-green-100 hover:shadow-xl transition-all duration-300">
           <CardContent className="p-3 lg:p-6 text-center">
             <div className="p-2 lg:p-3 bg-green-500 rounded-full w-fit mx-auto mb-2 lg:mb-4">
@@ -4547,14 +4554,19 @@ const handleUpdateExchangeRate = () => {
             <div>
               <Label htmlFor="paymentAmount">{t("loan.paymentAmount")} *</Label>
               <Input
-                id="paymentAmount"
-                type="number"
-                min="0"
-                max={selectedLoan?.amountRemaining || 0}
-                value={loanPaymentData.amount}
-                onChange={(e) => setLoanPaymentData({ ...loanPaymentData, amount: e.target.value })}
-                placeholder="0.00"
-              />
+  id="paymentAmount"
+  type="number"
+  min="0"
+  max={selectedLoan?.amountRemaining || 0}
+  value={loanPaymentData.amount}
+  onChange={(e) => setLoanPaymentData({ ...loanPaymentData, amount: e.target.value })}
+  placeholder="0.00"
+  className={
+    Number(loanPaymentData.amount) > (selectedLoan?.amountRemaining || 0)
+      ? "border-red-500 focus:border-red-600 bg-red-50"
+      : "border-gray-300 focus:border-[#0099b5]"
+  }
+/>
             </div>
 
             <div>
