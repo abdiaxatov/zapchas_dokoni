@@ -230,6 +230,16 @@ export default function DataPage() {
   const [tempExchangeRate, setTempExchangeRate] = useState("12500")
 
   useEffect(() => {
+  if (typeof window !== "undefined") {
+    const savedRate = localStorage.getItem("exchangeRate")
+    if (savedRate && !isNaN(Number(savedRate))) {
+      setExchangeRate(Number(savedRate))
+      setTempExchangeRate(savedRate)
+    }
+  }
+}, [])
+
+  useEffect(() => {
     if (!loading && !user) {
       router.push("/login")
     }
@@ -1573,24 +1583,28 @@ export default function DataPage() {
     )
   }
 
-  const handleUpdateExchangeRate = () => {
-    const rate = Number.parseFloat(tempExchangeRate)
-    if (!isNaN(rate) && rate > 0) {
-      setExchangeRate(rate)
-      setShowExchangeRateModal(false)
-      showToast({
-        title: "Muvaffaqiyatli",
-        description: `Valyuta kursi yangilandi: 1$ = ${rate.toLocaleString()} so'm`,
-        variant: "success",
-      })
-    } else {
-      showToast({
-        title: "Xatolik",
-        description: "Iltimos, to'g'ri qiymat kiriting",
-        variant: "destructive",
-      })
-    }
+
+// 2. Kursni yangilash va localStorage-ga saqlash
+const handleUpdateExchangeRate = () => {
+  const rate = Number.parseFloat(tempExchangeRate)
+  if (!isNaN(rate) && rate > 0) {
+    setExchangeRate(rate)
+    localStorage.setItem("exchangeRate", rate.toString())
+    setShowExchangeRateModal(false)
+    showToast({
+      title: "Muvaffaqiyatli",
+      description: `Valyuta kursi yangilandi: 1$ = ${rate.toLocaleString()} so'm`,
+      variant: "success",
+    })
+  } else {
+    showToast({
+      title: "Xatolik",
+      description: "Iltimos, to'g'ri qiymat kiriting",
+      variant: "destructive",
+    })
   }
+}
+
 
 
   return (
@@ -3352,6 +3366,33 @@ export default function DataPage() {
         </TabsContent>
 
       </Tabs>
+
+      <Dialog open={showExchangeRateModal} onOpenChange={setShowExchangeRateModal}>
+  <DialogContent className="max-w-xs">
+    <DialogHeader>
+      <DialogTitle>Valyuta kursini o'zgartirish</DialogTitle>
+      <DialogDescription>1$ = {exchangeRate.toLocaleString()} so'm</DialogDescription>
+    </DialogHeader>
+    <div className="space-y-4">
+      <Label htmlFor="exchange-rate">Yangi kurs (so'm):</Label>
+      <Input
+        id="exchange-rate"
+        type="number"
+        min="1"
+        value={tempExchangeRate}
+        onChange={(e) => setTempExchangeRate(e.target.value)}
+      />
+    </div>
+    <DialogFooter>
+      <Button variant="outline" onClick={() => setShowExchangeRateModal(false)}>
+        Bekor qilish
+      </Button>
+      <Button onClick={handleUpdateExchangeRate}>
+        Saqlash
+      </Button>
+    </DialogFooter>
+  </DialogContent>
+</Dialog>
 
       <Dialog open={isDetailsModalOpen} onOpenChange={setIsDetailsModalOpen}>
         <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
