@@ -1,7 +1,6 @@
 import { collection, addDoc, updateDoc, doc, getDocs, query, orderBy, Timestamp } from "firebase/firestore"
 import { db } from "./firebase"
 import staticGMsData from "@/data/gm-data.json"
-
 export interface GM {
   id?: string
   kodi: string
@@ -23,13 +22,15 @@ export interface GM {
   dimensions?: string // Dimensions (LxWxH)
   description?: string // GM description
   status?: "active" | "inactive" | "discontinued" // GM status
+  paymentType?: "naqd" | "qarz" // Payment type: naqd (cash) or qarz (credit)
   lastSold?: Timestamp // Last sale date
-  paymentType?: "naqd" | "qarz"
   lastRestocked?: Timestamp // Last restock date
   createdAt?: Timestamp
   updatedAt?: Timestamp
   isDeleted?: boolean // Soft delete flag
   isStatic?: boolean // Flag to identify static data
+  debtPrice?: string // Debt price if sold on credit
+  debtQuantity?: number // Quantity sold on credit
 }
 
 export interface SaleGM {
@@ -42,6 +43,8 @@ export interface SaleGM {
     quantity: number
     price: number
     total: number
+    model?: string // Added optional model field
+    location?: string // Added optional location field
   }>
   totalAmount: number
   receiptNumber: string
@@ -87,8 +90,8 @@ const removeUndefinedFields = <T extends Record<string, any>>(obj: T): Partial<T
 }
 
 const COLLECTION_NAME = "GMs"
-const SALES_COLLECTION_NAME = "SaleGMs"
-const LOANS_COLLECTION_NAME = "loans"
+const SALES_COLLECTION_NAME = "saleGMs"
+const LOANS_COLLECTION_NAME = "loans1"
 
 const loadStaticGMs = async (): Promise<GM[]> => {
   try {
@@ -115,8 +118,8 @@ const loadStaticGMs = async (): Promise<GM[]> => {
       dimensions: item.dimensions,
       description: item.description,
       status: item.status || "active",
+      paymentType: item.paymentType || "naqd", // Default payment type is cash
       isStatic: true,
-      paymentType: item.paymentType || "naqd",
     }))
   } catch (error) {
     console.error("Error loading static GMs:", error)
@@ -183,7 +186,7 @@ export const addGM = async (GM: Omit<GM, "id" | "createdAt" | "updatedAt">): Pro
       minStock: GM.minStock || 10,
       maxStock: GM.maxStock || 1000,
       status: GM.status || "active",
-      paymentType: GM.paymentType || "naqd",
+      paymentType: GM.paymentType || "naqd", // Default payment type is cash
       isDeleted: false,
       isStatic: false,
       createdAt: Timestamp.now(),
@@ -539,8 +542,11 @@ export const deleteAllGMs = async (): Promise<void> => {
 
 export const saveSaleGM = async (transaction: Omit<SaleGM, "id" | "createdAt">): Promise<string> => {
   try {
+    const cleanedItems = transaction.items.map((item) => removeUndefinedFields(item))
+
     const cleanedTransaction = removeUndefinedFields({
       ...transaction,
+      items: cleanedItems,
       createdAt: Timestamp.now(),
     })
 
@@ -564,7 +570,7 @@ export const getSaleGMs = async (): Promise<SaleGM[]> => {
         }) as SaleGM,
     )
   } catch (error) {
-    console.error("Error getting sale transactions:", error)
+    console.error("Error getting sale GMs:", error)
     throw error
   }
 }

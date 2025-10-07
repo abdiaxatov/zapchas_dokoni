@@ -219,9 +219,25 @@ export default function DataPage() {
     description: "",
     status: "active",
     paymentType: "naqd" as "naqd" | "qarz",
+    debtQuantity: "",
+    debtPrice: "",
   })
   const fileInputRef = useRef<HTMLInputElement>(null) // Declared fileInputRef
   const [isAddModalOpen, setIsAddModalOpen] = useState(false) // Declared isAddModalOpen state
+
+  const [exchangeRate, setExchangeRate] = useState(12500) // Default: 1 USD = 12500 UZS
+  const [showExchangeRateModal, setShowExchangeRateModal] = useState(false)
+  const [tempExchangeRate, setTempExchangeRate] = useState("12500")
+
+  useEffect(() => {
+  if (typeof window !== "undefined") {
+    const savedRate = localStorage.getItem("exchangeRate")
+    if (savedRate && !isNaN(Number(savedRate))) {
+      setExchangeRate(Number(savedRate))
+      setTempExchangeRate(savedRate)
+    }
+  }
+}, [])
 
   useEffect(() => {
     if (!loading && !user) {
@@ -583,8 +599,13 @@ export default function DataPage() {
         weight: Number.parseFloat(formData.weight) || 0,
         dimensions: formData.dimensions,
         description: formData.description,
-        status: formData.status,
+        status: ["active", "inactive", "discontinued"].includes(formData.status)
+          ? (formData.status as "active" | "inactive" | "discontinued")
+          : undefined,
         paymentType: formData.paymentType,
+        // Add debtQuantity and debtPrice if paymentType is 'qarz'
+        debtQuantity: formData.paymentType === "qarz" ? Number.parseInt(formData.debtQuantity) || 0 : undefined,
+        debtPrice: formData.paymentType === "qarz" ? (Number.parseFloat(formData.debtPrice) || 0).toString() : undefined,
         sold: 0,
       })
 
@@ -611,6 +632,9 @@ export default function DataPage() {
       setIsSubmitting(false)
     }
   }
+const totalDebtGMs = data
+  .filter((GM) => GM.paymentType === "qarz")
+  .reduce((sum, GM) => sum + (Number(GM.debtQuantity) || 0), 0)
 
   const resetFormData = () => {
     setFormData({
@@ -632,6 +656,9 @@ export default function DataPage() {
       description: "",
       status: "active",
       paymentType: "naqd",
+      // Reset debt fields
+      debtQuantity: "",
+      debtPrice: "",
     })
   }
 
@@ -656,6 +683,9 @@ export default function DataPage() {
       description: row.description || "",
       status: row.status || "active",
       paymentType: row.paymentType || "naqd",
+      // Initialize debt fields from existing GM data
+      debtQuantity: row.debtQuantity ? row.debtQuantity.toString() : "",
+      debtPrice: row.debtPrice ? row.debtPrice.toString() : "",
     })
     setIsEditModalOpen(true)
   }
@@ -685,6 +715,9 @@ export default function DataPage() {
         description: formData.description,
         status: formData.status,
         paymentType: formData.paymentType,
+        // Update debtQuantity and debtPrice if paymentType is 'qarz'
+        debtQuantity: formData.paymentType === "qarz" ? Number.parseInt(formData.debtQuantity) || 0 : undefined,
+        debtPrice: formData.paymentType === "qarz" ? Number.parseFloat(formData.debtPrice) || 0 : undefined,
       })
 
       await loadGMs()
@@ -990,6 +1023,9 @@ export default function DataPage() {
       WEIGHT: GM.weight || 0,
       DIMENSIONS: GM.dimensions || "",
       DESCRIPTION: GM.description || "",
+      // Include debtQuantity and debtPrice in export
+      DEBT_QUANTITY: GM.debtQuantity || 0,
+      DEBT_PRICE: GM.debtPrice || 0,
     }))
 
     const ws = XLSX.utils.json_to_sheet(exportData)
@@ -1365,52 +1401,52 @@ export default function DataPage() {
     })
   }
 
-  const handleAddLoanPayment = async () => {
-    if (!selectedLoan) return
+const handleAddLoanPayment = async () => {
+  if (!selectedLoan) return
 
-    try {
-      const amount = Number.parseFloat(loanPaymentData.amount)
-      if (isNaN(amount) || amount <= 0) {
-        showToast({
-          title: t("common.error"),
-          description: "To'g'ri summa kiriting",
-          variant: "destructive",
-        })
-        return
-      }
-
-      if (amount > (selectedLoan.amountRemaining || 0)) {
-        showToast({
-          title: t("common.error"),
-          description: "Summa qolgan qarzdan ko'p bo'lmasligi kerak",
-          variant: "destructive",
-        })
-        return
-      }
-
-      await addLoanPayment(selectedLoan.id!, amount, loanPaymentData.note)
-
+  try {
+    const amount = Number.parseFloat(loanPaymentData.amount)
+    if (isNaN(amount) || amount <= 0) {
       showToast({
-        title: t("common.success"),
-        description: t("loan.paymentSuccess"),
-        variant: "success",
-      })
-
-      setIsLoanPaymentModalOpen(false)
-      setLoanPaymentData({ amount: "", note: "" })
-      setSelectedLoan(null)
-      await loadLoans()
-      await loadPendingLoans()
-      await loadTotalLoanAmount()
-    } catch (error) {
-      console.error("Error adding loan payment:", error)
-      showToast({
-        title: t("common.error"),
-        description: "To'lovni qo'shishda xatolik yuz berdi",
+        title: "Hato",
+        description: "To'g'ri summa kiriting",
         variant: "destructive",
       })
+      return
     }
+
+    if (amount > (selectedLoan.amountRemaining || 0)) {
+      showToast({
+        title: "Hato",
+        description: "Kiritilgan summa qolgan qarzdan ko'p bo'lmasligi kerak!",
+        variant: "destructive",
+      })
+      return
+    }
+
+    await addLoanPayment(selectedLoan.id!, amount, loanPaymentData.note)
+
+    showToast({
+      title: t("common.success"),
+      description: t("loan.paymentSuccess"),
+      variant: "success",
+    })
+
+    setIsLoanPaymentModalOpen(false)
+    setLoanPaymentData({ amount: "", note: "" })
+    setSelectedLoan(null)
+    await loadLoans()
+    await loadPendingLoans()
+    await loadTotalLoanAmount()
+  } catch (error) {
+    console.error("Error adding loan payment:", error)
+    showToast({
+      title: "Hato",
+      description: "To'lovni qo'shishda xatolik yuz berdi",
+      variant: "destructive",
+    })
   }
+}
 
   // Render function for the loans table with GM details
   const renderLoansTable = () => {
@@ -1549,16 +1585,51 @@ export default function DataPage() {
       </div>
     )
   }
+const totalDebtSum = data
+  .filter((GM) => GM.paymentType === "qarz")
+  .reduce((sum, GM) => sum + (Number(GM.debtPrice) || 0), 0)
+
+// 2. Kursni yangilash va localStorage-ga saqlash
+const handleUpdateExchangeRate = () => {
+  const rate = Number.parseFloat(tempExchangeRate)
+  if (!isNaN(rate) && rate > 0) {
+    setExchangeRate(rate)
+    localStorage.setItem("exchangeRate", rate.toString())
+    setShowExchangeRateModal(false)
+    showToast({
+      title: "Muvaffaqiyatli",
+      description: `Valyuta kursi yangilandi: 1$ = ${rate.toLocaleString()} so'm`,
+      variant: "success",
+    })
+  } else {
+    showToast({
+      title: "Xatolik",
+      description: "Iltimos, to'g'ri qiymat kiriting",
+      variant: "destructive",
+    })
+  }
+}
+
+
 
   return (
     <div className="space-y-6 p-4 lg:p-6">
       {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl lg:text-3xl font-bold text-gray-900 flex items-center gap-3">
-            <Table className="h-8 w-8 text-[#0099b5]" />
-            {t("sidebar.table")}
-          </h1>
+   
+            {/* Modified header to include currency exchange rate button */}
+      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between mb-6">
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">hyundai & kia</h1>
+          <Button
+            onClick={() => setShowExchangeRateModal(true)}
+            variant="outline"
+            size="sm"
+            className="flex items-center gap-2 border-blue-300 text-blue-700 hover:bg-blue-50"
+          >
+            <DollarSign className="h-4 w-4" />
+            <span className="text-sm">1$ = {exchangeRate.toLocaleString()} so'm</span>
+          </Button>
+
           <p className="text-sm text-gray-500 mt-1 flex items-center gap-2">
             <span className="font-medium text-gray-700">{t("data.manage")}</span>
             <span className="text-gray-400">•</span>
@@ -1606,16 +1677,18 @@ export default function DataPage() {
 
       {/* Statistics Overview Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-6">
-        <Card className="border-0 shadow-lg bg-gradient-to-br from-blue-50 to-blue-100 hover:shadow-xl transition-all duration-300">
-          <CardContent className="p-3 lg:p-6 text-center">
-            <div className="p-2 lg:p-3 bg-blue-500 rounded-full w-fit mx-auto mb-2 lg:mb-4">
-              <Package className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
-            </div>
-            <p className="text-xs lg:text-sm font-medium text-blue-700">{t("totalGMs")}</p>
-            <p className="text-lg lg:text-2xl font-bold text-blue-900">{data.length.toLocaleString()}</p>
-          </CardContent>
-        </Card>
+      
+   <Card className="border-0 shadow-lg bg-gradient-to-br from-orange-50 to-orange-100 hover:shadow-xl transition-all duration-300">
+  <CardContent className="p-3 lg:p-6 text-center">
+    <div className="p-2 lg:p-3 bg-orange-500 rounded-full w-fit mx-auto mb-2 lg:mb-4">
+      <HandCoins className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
+    </div>
+    <p className="text-xs lg:text-sm font-medium text-orange-700"> Jami qarz summa</p>
+<p className=" text-lg lg:text-2xl font-bold text-orange-900">{totalDebtSum.toLocaleString()} $</p>
+    <p className="text-xs text-orange-700 mt-1">Qarzga olingan mahsulotlar:{totalDebtGMs.toLocaleString()}</p>
 
+  </CardContent>
+</Card>
         <Card className="border-0 shadow-lg bg-gradient-to-br from-green-50 to-green-100 hover:shadow-xl transition-all duration-300">
           <CardContent className="p-3 lg:p-6 text-center">
             <div className="p-2 lg:p-3 bg-green-500 rounded-full w-fit mx-auto mb-2 lg:mb-4">
@@ -1623,7 +1696,7 @@ export default function DataPage() {
             </div>
             <p className="text-xs lg:text-sm font-medium text-green-700">{t("totalSales")}</p>
             <p className="text-lg lg:text-2xl font-bold text-green-900">
-              {data.reduce((sum, GM) => sum + (GM.sold || 0), 0).toLocaleString()}
+              <p className="text-2xl font-bold text-blue-900">{filteredSales.length}</p>
             </p>
           </CardContent>
         </Card>
@@ -1713,7 +1786,7 @@ export default function DataPage() {
           </TabsTrigger>
           <TabsTrigger value="history" className="flex items-center gap-2 text-sm lg:text-base font-medium">
             <Receipt className="h-4 w-4" />
-            Tarix
+            {t("tabs.salesHistory")}
           </TabsTrigger>
         </TabsList>
 
@@ -2039,19 +2112,43 @@ export default function DataPage() {
                           </div>
                         </td>
                         <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
-                          <Badge
-                            className={cn(
-                              "font-semibold",
-                              row.paymentType === "qarz"
-                                ? "bg-orange-100 text-orange-800 border-orange-200"
-                                : "bg-green-100 text-green-800 border-green-200",
+                          <div className="flex flex-col gap-1">
+                            <Badge
+                              className={cn(
+                                "font-semibold w-fit",
+                                row.paymentType === "qarz"
+                                  ? "bg-orange-100 text-orange-800 border-orange-200"
+                                  : "bg-green-100 text-green-800 border-green-200",
+                              )}
+                            >
+                              {row.paymentType === "qarz" ? "Qarz" : "Naqd"}
+                            </Badge>
+                            {row.paymentType === "qarz" && (row.debtQuantity || row.debtPrice) && (
+                              <div className="text-xs text-orange-700 space-y-0.5 mt-1">
+                                {row.debtQuantity && (
+                                  <div className="flex items-center gap-1">
+                                    <Package className="h-3 w-3" />
+                                    <span>{row.debtQuantity} dona</span>
+                                  </div>
+                                )}
+                                {row.debtPrice && (
+                                  <div className="flex items-center gap-1">
+                                    <DollarSign className="h-3 w-3" />
+                                    <span>{row.debtPrice} sum</span>
+                                  </div>
+                                )}
+                              </div>
                             )}
-                          >
-                            {row.paymentType === "qarz" ? "Qarz" : "Naqd"}
-                          </Badge>
+                          </div>
                         </td>
                         <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
-                          <span className="font-semibold text-green-600 text-lg">{row.narxi}</span>
+                                                    <div className="flex flex-col gap-1">
+                            <span className="font-semibold text-green-600 text-lg">${row.narxi}</span>
+                            <span className="text-sm text-gray-500">
+                              {(Number.parseFloat(row.narxi || "0") * exchangeRate).toLocaleString()} so'm
+                            </span>
+                          </div>
+
                         </td>
                         <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
                           <Badge
@@ -2524,7 +2621,7 @@ export default function DataPage() {
                       cy="50%"
                       outerRadius={100}
                       dataKey="value"
-                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                      label={({ name, percent }) => `${name} ${((percent as number) * 100).toFixed(0)}%`}
                     >
                       {categoryData.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={`hsl(${index * 45}, 70%, 60%)`} />
@@ -2581,9 +2678,9 @@ export default function DataPage() {
                 <div>
                   <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
                     <ShoppingCart className="h-4 w-4 lg:h-5 lg:w-5 text-[#0099b5]" />
-                    Sotilgan mahsulotlar tarixi
+                    {t("stats.salesHistory")}
                   </CardTitle>
-                  <CardDescription className="text-sm">Barcha sotuvlar va ularning tafsilotlari</CardDescription>
+                  <CardDescription className="text-sm">{t("stats.salesHistoryDescription")}</CardDescription>
                 </div>
                 <div className="flex gap-2">
                   <Button
@@ -2653,7 +2750,7 @@ export default function DataPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-green-700 font-medium">Jami summa</p>
-                        <p className="text-2xl font-bold text-green-900">${totalSalesAmount.toLocaleString()}</p>
+                        <p className="text-2xl font-bold text-green-900">${totalRevenue.toLocaleString()}</p>
                       </div>
                       <div className="p-3 bg-green-500 rounded-full">
                         <DollarSign className="h-6 w-6 text-white" />
@@ -3072,7 +3169,7 @@ export default function DataPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-green-700 font-medium">Jami summa</p>
-                        <p className="text-2xl font-bold text-green-900">${totalSalesAmount.toLocaleString()}</p>
+                        <p className="text-2xl font-bold text-green-900">${filteredSales.reduce((acc, sale) => acc + sale.totalAmount, 0).toLocaleString()}</p>
                       </div>
                       <div className="p-3 bg-green-500 rounded-full">
                         <DollarSign className="h-6 w-6 text-white" />
@@ -3274,7 +3371,35 @@ export default function DataPage() {
             </CardContent>
           </Card>
         </TabsContent>
+
       </Tabs>
+
+      <Dialog open={showExchangeRateModal} onOpenChange={setShowExchangeRateModal}>
+  <DialogContent className="max-w-xs">
+    <DialogHeader>
+      <DialogTitle>Valyuta kursini o'zgartirish</DialogTitle>
+      <DialogDescription>1$ = {exchangeRate.toLocaleString()} so'm</DialogDescription>
+    </DialogHeader>
+    <div className="space-y-4">
+      <Label htmlFor="exchange-rate">Yangi kurs (so'm):</Label>
+      <Input
+        id="exchange-rate"
+        type="number"
+        min="1"
+        value={tempExchangeRate}
+        onChange={(e) => setTempExchangeRate(e.target.value)}
+      />
+    </div>
+    <DialogFooter>
+      <Button variant="outline" onClick={() => setShowExchangeRateModal(false)}>
+        Bekor qilish
+      </Button>
+      <Button onClick={handleUpdateExchangeRate}>
+        Saqlash
+      </Button>
+    </DialogFooter>
+  </DialogContent>
+</Dialog>
 
       <Dialog open={isDetailsModalOpen} onOpenChange={setIsDetailsModalOpen}>
         <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
@@ -3820,6 +3945,35 @@ export default function DataPage() {
                 rows={3}
               />
             </div>
+            {/* Added conditional inputs for debt quantity and price when editing and payment type is qarz */}
+            {formData.paymentType === "qarz" && (
+              <>
+                <div>
+                  <Label htmlFor="edit-debtQuantity">Qarz soni (dona) *</Label>
+                  <Input
+                    id="edit-debtQuantity"
+                    type="number"
+                    min="0"
+                    value={formData.debtQuantity}
+                    onChange={(e) => setFormData({ ...formData, debtQuantity: e.target.value })}
+                    placeholder="Necha dona qarz"
+                    className="border-orange-200 focus:border-orange-400"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="edit-debtPrice">Qarz narxi (sum) *</Label>
+                  <Input
+                    id="edit-debtPrice"
+                    type="number"
+                    min="0"
+                    value={formData.debtPrice}
+                    onChange={(e) => setFormData({ ...formData, debtPrice: e.target.value })}
+                    placeholder="Qancha sum qarz"
+                    className="border-orange-200 focus:border-orange-400"
+                  />
+                </div>
+              </>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEditModalOpen(false)} disabled={isSubmitting}>
@@ -3881,11 +4035,8 @@ export default function DataPage() {
               {t("cancel")}
             </Button>
             <Button onClick={confirmSell} className="bg-green-600 hover:bg-green-700" disabled={isSubmitting}>
-              {isSubmitting ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
+
                 <ShoppingCart className="h-4 w-4 mr-2" />
-              )}
               {t("confirmSale")}
             </Button>
           </DialogFooter>
@@ -4012,6 +4163,36 @@ export default function DataPage() {
                 </SelectContent>
               </Select>
             </div>
+
+            {formData.paymentType === "qarz" && (
+              <>
+                <div>
+                  <Label htmlFor="debtQuantity">Qarz soni (dona) *</Label>
+                  <Input
+                    id="debtQuantity"
+                    type="number"
+                    min="0"
+                    value={formData.debtQuantity}
+                    onChange={(e) => setFormData({ ...formData, debtQuantity: e.target.value })}
+                    placeholder="Necha dona qarz"
+                    className="border-orange-200 focus:border-orange-400"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="debtPrice">Qarz narxi (sum) *</Label>
+                  <Input
+                    id="debtPrice"
+                    type="number"
+                    min="0"
+                    value={formData.debtPrice}
+                    onChange={(e) => setFormData({ ...formData, debtPrice: e.target.value })}
+                    placeholder="Qancha sum qarz"
+                    className="border-orange-200 focus:border-orange-400"
+                  />
+                </div>
+              </>
+            )}
+
             <div>
               <Label htmlFor="narxi">{t("narxi")} *</Label>
               <Input
@@ -4336,17 +4517,8 @@ export default function DataPage() {
               {t("cancel")}
             </Button>
             <Button onClick={handleBulkSell} disabled={isSubmitting}>
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Yuklanmoqda...
-                </>
-              ) : (
-                <>
                   <ShoppingCart className="mr-2 h-4 w-4" />
                   {sellAsLoan ? t("loan.sellAsLoan") : t("confirmSale")}
-                </>
-              )}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -4382,14 +4554,19 @@ export default function DataPage() {
             <div>
               <Label htmlFor="paymentAmount">{t("loan.paymentAmount")} *</Label>
               <Input
-                id="paymentAmount"
-                type="number"
-                min="0"
-                max={selectedLoan?.amountRemaining || 0}
-                value={loanPaymentData.amount}
-                onChange={(e) => setLoanPaymentData({ ...loanPaymentData, amount: e.target.value })}
-                placeholder="0.00"
-              />
+  id="paymentAmount"
+  type="number"
+  min="0"
+  max={selectedLoan?.amountRemaining || 0}
+  value={loanPaymentData.amount}
+  onChange={(e) => setLoanPaymentData({ ...loanPaymentData, amount: e.target.value })}
+  placeholder="0.00"
+  className={
+    Number(loanPaymentData.amount) > (selectedLoan?.amountRemaining || 0)
+      ? "border-red-500 focus:border-red-600 bg-red-50"
+      : "border-gray-300 focus:border-[#0099b5]"
+  }
+/>
             </div>
 
             <div>
