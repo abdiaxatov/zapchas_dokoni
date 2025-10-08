@@ -17,6 +17,7 @@ export interface Product {
   category?: string // Product category
   supplier?: string // Supplier information
   cost?: string // Cost price
+  source?: string // 🔹 Qayerdan olib kelindi
   profit?: number // Profit margin
   barcode?: string // Barcode
   weight?: number // Weight in kg
@@ -32,6 +33,8 @@ export interface Product {
   isStatic?: boolean // Flag to identify static data
   debtPrice?: string // Debt price if sold on credit
   debtQuantity?: number // Quantity sold on credit
+    profitPercent?: number // 🔹 Foiz ustama (masalan: 15)
+    
 }
 
 export interface SaleTransaction {
@@ -67,6 +70,7 @@ export interface LoanRecord {
   totalAmount: number
   amountPaid: number
   amountRemaining: number
+  source?: string // Qayerdan olib kelindi
   loanDate: Timestamp
   dueDate?: Timestamp
   status: "pending" | "partial" | "paid"
@@ -99,29 +103,31 @@ const loadStaticProducts = async (): Promise<Product[]> => {
     const staticData = staticProductsData
 
     // Transform static data to match Product interface
-    return staticData.map((item: any, index: number) => ({
-      id: item.id || `static-${index + 1}`, // Use existing ID or generate one
-      kodi: item.kodi || item.KODI,
-      model: item.model || item.MODEL || "",
-      nomi: item.nomi || item.NOMI,
-      kompaniya: item.kompaniya || item.KOMPANIYA,
-      narxi: typeof item.narxi === "number" ? item.narxi.toString() : item.narxi || item.NARXI,
-      sold: item.sold || 0,
-      stock: item.stock || 0,
-      minStock: item.minStock || 10,
-      maxStock: item.maxStock || 1000,
-      location: item.location,
-      category: item.category,
-      supplier: item.supplier,
-      cost: item.cost,
-      barcode: item.barcode,
-      weight: item.weight,
-      dimensions: item.dimensions,
-      description: item.description,
-      status: item.status || "active",
-      paymentType: item.paymentType || "naqd", // Default payment type is cash
-      isStatic: true,
-    }))
+   return staticData.map((item: any, index: number) => ({
+  id: item.id || `static-${index + 1}`, // Use existing ID or generate one
+  kodi: item.kodi || item.KODI,
+  model: item.model || item.MODEL || "",
+  nomi: item.nomi || item.NOMI,
+  kompaniya: item.kompaniya || item.KOMPANIYA,
+  narxi: typeof item.narxi === "number" ? item.narxi.toString() : item.narxi || item.NARXI,
+  sold: item.sold || 0,
+  stock: item.stock || 0,
+  minStock: item.minStock || 10,
+  maxStock: item.maxStock || 1000,
+  location: item.location,
+  category: item.category,
+  supplier: item.supplier,
+  cost: item.cost,
+  barcode: item.barcode,
+  weight: item.weight,
+  profitPercent: item.profitPercent,
+  dimensions: item.dimensions,
+  description: item.description,
+  status: item.status || "active",
+  paymentType: item.paymentType || "naqd", // Default payment type is cash
+  source: item.source || "", // 🔹 Qayerdan olib kelindi maydoni qo‘shildi
+  isStatic: true,
+}))
   } catch (error) {
     console.error("Error loading static products:", error)
     return []
@@ -184,6 +190,8 @@ export const addProduct = async (product: Omit<Product, "id" | "createdAt" | "up
       ...product,
       sold: product.sold || 0,
       stock: product.stock || 0,
+      profitPercent: product.profitPercent || 0,
+      source: product.source || "", // source maydoni ham kiritiladi
       minStock: product.minStock || 10,
       maxStock: product.maxStock || 1000,
       status: product.status || "active",
@@ -227,6 +235,8 @@ export const updateProduct = async (id: string, updates: Partial<Product>): Prom
           ...updates,
           id: id,
           isStatic: true,
+          profitPercent: updates.profitPercent || product.profitPercent || 0,
+           source: product.source || "", // source maydoni ham kiritiladi
           isDeleted: false,
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now(),
@@ -499,6 +509,7 @@ export const getInventoryValue = async (): Promise<number> => {
     return products.reduce((total, product) => {
       const price = Number.parseFloat(product.narxi.replace(/[^\d.]/g, "")) || 0
       const stock = product.stock || 0
+      
       return total + price * stock
     }, 0)
   } catch (error) {

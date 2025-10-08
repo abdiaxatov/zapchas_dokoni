@@ -207,6 +207,7 @@ export default function DataPage() {
     kompaniya: "",
     narxi: "",
     stock: "0",
+     source: "",
     minStock: "10",
     maxStock: "1000",
     location: "",
@@ -221,6 +222,8 @@ export default function DataPage() {
     paymentType: "naqd" as "naqd" | "qarz",
     debtQuantity: "",
     debtPrice: "",
+    profitPercent: "", // 🔹 Foiz
+  profitPrice: "", 
   })
   const fileInputRef = useRef<HTMLInputElement>(null) // Declared fileInputRef
   const [isAddModalOpen, setIsAddModalOpen] = useState(false) // Declared isAddModalOpen state
@@ -228,6 +231,11 @@ export default function DataPage() {
   const [exchangeRate, setExchangeRate] = useState(12500) // Default: 1 USD = 12500 UZS
   const [showExchangeRateModal, setShowExchangeRateModal] = useState(false)
   const [tempExchangeRate, setTempExchangeRate] = useState("12500")
+const calculatedProfitPrice = useMemo(() => {
+  const price = Number.parseFloat(formData.narxi) || 0
+  const percent = Number.parseFloat(formData.profitPercent) || 0
+  return price + (price * percent / 100)
+}, [formData.narxi, formData.profitPercent])
 
   useEffect(() => {
   if (typeof window !== "undefined") {
@@ -582,32 +590,33 @@ export default function DataPage() {
     try {
       setIsSubmitting(true)
 
-      await addProduct({
-        kodi: formData.kodi,
-        model: formData.model,
-        nomi: formData.nomi,
-        kompaniya: formData.kompaniya,
-        narxi: formData.narxi,
-        stock: Number.parseInt(formData.stock) || 0,
-        minStock: Number.parseInt(formData.minStock) || 10,
-        maxStock: Number.parseInt(formData.maxStock) || 1000,
-        location: formData.location,
-        category: formData.category,
-        supplier: formData.supplier,
-        cost: formData.cost,
-        barcode: formData.barcode,
-        weight: Number.parseFloat(formData.weight) || 0,
-        dimensions: formData.dimensions,
-        description: formData.description,
-        status: ["active", "inactive", "discontinued"].includes(formData.status)
-          ? (formData.status as "active" | "inactive" | "discontinued")
-          : undefined,
-        paymentType: formData.paymentType,
-        // Add debtQuantity and debtPrice if paymentType is 'qarz'
-        debtQuantity: formData.paymentType === "qarz" ? Number.parseInt(formData.debtQuantity) || 0 : undefined,
-        debtPrice: formData.paymentType === "qarz" ? (Number.parseFloat(formData.debtPrice) || 0).toString() : undefined,
-        sold: 0,
-      })
+await addProduct({
+  kodi: formData.kodi,
+  model: formData.model,
+  nomi: formData.nomi,
+  kompaniya: formData.kompaniya,
+  narxi: formData.narxi,
+  stock: Number.parseInt(formData.stock) || 0,
+  minStock: Number.parseInt(formData.minStock) || 10,
+  maxStock: Number.parseInt(formData.maxStock) || 1000,
+  location: formData.location,
+  category: formData.category,
+  supplier: formData.supplier,
+  cost: formData.cost,
+  barcode: formData.barcode,
+  weight: Number.parseFloat(formData.weight) || 0,
+  dimensions: formData.dimensions,
+  description: formData.description,
+  status: ["active", "inactive", "discontinued"].includes(formData.status)
+    ? (formData.status as "active" | "inactive" | "discontinued")
+    : undefined,
+    profitPercent: Number(formData.profitPercent) || 0, // 🔹 Foizni saqlash
+  paymentType: formData.paymentType,
+  source: formData.source, 
+  debtQuantity: formData.paymentType === "qarz" ? Number.parseInt(formData.debtQuantity) || 0 : undefined,
+  debtPrice: formData.paymentType === "qarz" ? (Number.parseFloat(formData.debtPrice) || 0).toString() : undefined,
+  sold: 0,
+})
 
       await loadProducts()
       await loadLowStockProducts()
@@ -657,38 +666,41 @@ const totalDebtProducts = data
       status: "active",
       paymentType: "naqd",
       // Reset debt fields
+      source: "",
       debtQuantity: "",
       debtPrice: "",
+      profitPercent: "",
     })
   }
 
-  const handleEdit = (row: Product) => {
-    setEditingRow(row)
-    setFormData({
-      kodi: row.kodi,
-      model: row.model,
-      nomi: row.nomi,
-      kompaniya: row.kompaniya,
-      narxi: row.narxi,
-      stock: (row.stock || 0).toString(),
-      minStock: (row.minStock || 10).toString(),
-      maxStock: (row.maxStock || 1000).toString(),
-      location: row.location || "",
-      category: row.category || "",
-      supplier: row.supplier || "",
-      cost: row.cost || "",
-      barcode: row.barcode || "",
-      weight: (row.weight || 0).toString(),
-      dimensions: row.dimensions || "",
-      description: row.description || "",
-      status: row.status || "active",
-      paymentType: row.paymentType || "naqd",
-      // Initialize debt fields from existing product data
-      debtQuantity: row.debtQuantity ? row.debtQuantity.toString() : "",
-      debtPrice: row.debtPrice ? row.debtPrice.toString() : "",
-    })
-    setIsEditModalOpen(true)
-  }
+const handleEdit = (row: Product) => {
+  setEditingRow(row)
+  setFormData({
+    kodi: row.kodi,
+    model: row.model,
+    nomi: row.nomi,
+    kompaniya: row.kompaniya,
+    narxi: row.narxi,
+    stock: (row.stock || 0).toString(),
+    minStock: (row.minStock || 10).toString(),
+    maxStock: (row.maxStock || 1000).toString(),
+    location: row.location || "",
+    category: row.category || "",
+    supplier: row.supplier || "",
+    cost: row.cost || "",
+    barcode: row.barcode || "",
+    weight: (row.weight || 0).toString(),
+    dimensions: row.dimensions || "",
+    description: row.description || "",
+    profitPercent:row.profitPercent || "", // 🔹 Foiz
+    status: row.status || "active",
+    paymentType: row.paymentType || "naqd",
+    source: row.source || "", // 🔹 Qayerdan olib kelindi maydoni qo‘shildi
+    debtQuantity: row.debtQuantity ? row.debtQuantity.toString() : "",
+    debtPrice: row.debtPrice ? row.debtPrice.toString() : "",
+  })
+  setIsEditModalOpen(true)
+}
 
   const handleUpdate = async () => {
     if (!editingRow?.id) return
@@ -696,29 +708,30 @@ const totalDebtProducts = data
     try {
       setIsSubmitting(true)
 
-      await updateProduct(editingRow.id, {
-        kodi: formData.kodi,
-        model: formData.model,
-        nomi: formData.nomi,
-        kompaniya: formData.kompaniya,
-        narxi: formData.narxi,
-        stock: Number.parseInt(formData.stock) || 0,
-        minStock: Number.parseInt(formData.minStock) || 10,
-        maxStock: Number.parseInt(formData.maxStock) || 1000,
-        location: formData.location,
-        category: formData.category,
-        supplier: formData.supplier,
-        cost: formData.cost,
-        barcode: formData.barcode,
-        weight: Number.parseFloat(formData.weight) || 0,
-        dimensions: formData.dimensions,
-        description: formData.description,
-        status: formData.status,
-        paymentType: formData.paymentType,
-        // Update debtQuantity and debtPrice if paymentType is 'qarz'
-        debtQuantity: formData.paymentType === "qarz" ? Number.parseInt(formData.debtQuantity) || 0 : undefined,
-        debtPrice: formData.paymentType === "qarz" ? Number.parseFloat(formData.debtPrice) || 0 : undefined,
-      })
+     await updateProduct(editingRow.id, {
+  kodi: formData.kodi,
+  model: formData.model,
+  nomi: formData.nomi,
+  kompaniya: formData.kompaniya,
+  narxi: formData.narxi,
+  stock: Number.parseInt(formData.stock) || 0,
+  minStock: Number.parseInt(formData.minStock) || 10,
+  maxStock: Number.parseInt(formData.maxStock) || 1000,
+  location: formData.location,
+  category: formData.category,
+  supplier: formData.supplier,
+  cost: formData.cost,
+  barcode: formData.barcode,
+  weight: Number.parseFloat(formData.weight) || 0,
+  dimensions: formData.dimensions,
+  description: formData.description,
+  profitPercent: Number(formData.profitPercent) || 0, // 🔹 Foizni saqlash
+  status: formData.status,
+  paymentType: formData.paymentType,
+  source: formData.source, 
+  debtQuantity: formData.paymentType === "qarz" ? Number.parseInt(formData.debtQuantity) || 0 : undefined,
+  debtPrice: formData.paymentType === "qarz" ? Number.parseFloat(formData.debtPrice) || 0 : undefined,
+})
 
       await loadProducts()
       await loadLowStockProducts()
@@ -1678,17 +1691,67 @@ const handleUpdateExchangeRate = () => {
       {/* Statistics Overview Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-6">
       
-   <Card className="border-0 shadow-lg bg-gradient-to-br from-orange-50 to-orange-100 hover:shadow-xl transition-all duration-300">
+<Card className="border-0 shadow-lg bg-gradient-to-br from-orange-50 to-orange-100 hover:shadow-xl transition-all duration-300">
   <CardContent className="p-3 lg:p-6 text-center">
     <div className="p-2 lg:p-3 bg-orange-500 rounded-full w-fit mx-auto mb-2 lg:mb-4">
       <HandCoins className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
     </div>
     <p className="text-xs lg:text-sm font-medium text-orange-700"> Jami qarz summa</p>
-<p className=" text-lg lg:text-2xl font-bold text-orange-900">{totalDebtSum.toLocaleString()} $</p>
-    <p className="text-xs text-orange-700 mt-1">Qarzga olingan mahsulotlar:{totalDebtProducts.toLocaleString()}</p>
-
+    <p className="text-lg lg:text-2xl font-bold text-orange-900">{totalDebtSum.toLocaleString()} $</p>
+    <p className="text-xs text-orange-700 mt-1">Qarzga olingan mahsulotlar: {totalDebtProducts.toLocaleString()}</p>
+    <Button
+      variant="outline"
+      size="sm"
+      className="mt-2 text-orange-700 border-orange-300 hover:bg-orange-100"
+      onClick={async () => {
+        const qarzProducts = data.filter((product) => product.paymentType === "qarz");
+        for (const product of qarzProducts) {
+          await updateProduct(product.id, {
+            ...product,
+            debtPrice: 0,
+            debtQuantity: 0,
+          });
+        }
+        await loadProducts();
+        showToast({
+          title: "Qarzlar tozalandi",
+          description: "Barcha qarz summalari 0 qilindi.",
+          variant: "success",
+        });
+      }}
+    >
+      Qarzlarni tozalash
+    </Button>
   </CardContent>
 </Card>
+{formData.paymentType === "qarz" && (
+  <>
+    <div>
+      <Label htmlFor="debtQuantity">Qarz soni (dona) *</Label>
+      <Input
+        id="debtQuantity"
+        type="number"
+        min="0"
+        value={formData.debtQuantity}
+        onChange={(e) => setFormData({ ...formData, debtQuantity: e.target.value })}
+        placeholder="Necha dona qarz"
+        className="border-orange-200 focus:border-orange-400"
+      />
+    </div>
+    <div>
+      <Label htmlFor="debtPrice">Qarz narxi (sum) *</Label>
+      <Input
+        id="debtPrice"
+        type="number"
+        min="0"
+        value={formData.debtPrice}
+        onChange={(e) => setFormData({ ...formData, debtPrice: e.target.value })}
+        placeholder="Qancha sum qarz"
+        className="border-orange-200 focus:border-orange-400"
+      />
+    </div>
+  </>
+)}
         <Card className="border-0 shadow-lg bg-gradient-to-br from-green-50 to-green-100 hover:shadow-xl transition-all duration-300">
           <CardContent className="p-3 lg:p-6 text-center">
             <div className="p-2 lg:p-3 bg-green-500 rounded-full w-fit mx-auto mb-2 lg:mb-4">
@@ -2141,15 +2204,42 @@ const handleUpdateExchangeRate = () => {
                             )}
                           </div>
                         </td>
-                        <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
-                                                    <div className="flex flex-col gap-1">
-                            <span className="font-semibold text-green-600 text-lg">${row.narxi}</span>
-                            <span className="text-sm text-gray-500">
-                              {(Number.parseFloat(row.narxi || "0") * exchangeRate).toLocaleString()} so'm
-                            </span>
-                          </div>
-
-                        </td>
+<td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
+  <div className="flex flex-col gap-1">
+    {/* Narx (USD) */}
+    <span className="font-semibold text-green-600 text-lg">
+      {row.narxi && !isNaN(Number(row.narxi.toString().replace(/,/g, "")))
+        ? `$${Number(row.narxi.toString().replace(/,/g, "")).toLocaleString()}`
+        : "-"}
+    </span>
+    {/* Narx (so'mda) */}
+    <span className="text-sm text-gray-500">
+      {row.narxi && !isNaN(Number(row.narxi.toString().replace(/,/g, "")))
+        ? `${(Number(row.narxi.toString().replace(/,/g, "")) * exchangeRate).toLocaleString()} so'm`
+        : "-"}
+    </span>
+    {/* Foizli narx (USD va so'mda) */}
+    <span className="font-semibold text-blue-700 text-sm">
+      {row.narxi && row.profitPercent && !isNaN(Number(row.narxi.toString().replace(/,/g, ""))) && !isNaN(Number(row.profitPercent)) && Number(row.profitPercent) > 0
+        ? <>
+            Foizli narx: ${(
+              Number(row.narxi.toString().replace(/,/g, "")) +
+              (Number(row.narxi.toString().replace(/,/g, "")) * Number(row.profitPercent) / 100)
+            ).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {" "}
+            ({row.profitPercent}%)
+            <br />
+            <span className="text-xs text-blue-600">
+              {(
+                (Number(row.narxi.toString().replace(/,/g, "")) + (Number(row.narxi.toString().replace(/,/g, "")) * Number(row.profitPercent) / 100)) * exchangeRate
+              ).toLocaleString()} so'm
+            </span>
+          </>
+        : "Foiz kiritilmagan"}
+    </span>
+  </div>
+</td>
+                        
                         <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
                           <Badge
                             className={cn(
@@ -3758,234 +3848,317 @@ const handleUpdateExchangeRate = () => {
       </Dialog>
 
       <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
-        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{t("editProduct")}</DialogTitle>
-            <DialogDescription>{t("editProductDescription")}</DialogDescription>
-          </DialogHeader>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="edit-kodi">{t("kodi")} *</Label>
-              <Input
-                id="edit-kodi"
-                value={formData.kodi}
-                onChange={(e) => setFormData({ ...formData, kodi: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-model">{t("model")}</Label>
-              <Input
-                id="edit-model"
-                value={formData.model}
-                onChange={(e) => setFormData({ ...formData, model: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-nomi">{t("nomi")} *</Label>
-              <Input
-                id="edit-nomi"
-                value={formData.nomi}
-                onChange={(e) => setFormData({ ...formData, nomi: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-kompaniya">{t("kompaniya")} *</Label>
-              <Input
-                id="edit-kompaniya"
-                value={formData.kompaniya}
-                onChange={(e) => setFormData({ ...formData, kompaniya: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-paymentType">To'lov turi *</Label>
-              <Select
-                value={formData.paymentType}
-                onValueChange={(value: "naqd" | "qarz") => setFormData({ ...formData, paymentType: value })}
-              >
-                <SelectTrigger className="border-[#0099b5]/20">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="naqd">Naqd (Pul)</SelectItem>
-                  <SelectItem value="qarz">Qarz</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="edit-narxi">{t("narxi")} *</Label>
-              <Input
-                id="edit-narxi"
-                value={formData.narxi}
-                onChange={(e) => setFormData({ ...formData, narxi: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-cost">{t("warehouse.cost")}</Label>
-              <Input
-                id="edit-cost"
-                value={formData.cost}
-                onChange={(e) => setFormData({ ...formData, cost: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-stock">{t("warehouse.stock")}</Label>
-              <Input
-                id="edit-stock"
-                type="number"
-                value={formData.stock}
-                onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-minStock">{t("warehouse.minStock")}</Label>
-              <Input
-                id="edit-minStock"
-                type="number"
-                value={formData.minStock}
-                onChange={(e) => setFormData({ ...formData, minStock: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-maxStock">{t("warehouse.maxStock")}</Label>
-              <Input
-                id="edit-maxStock"
-                type="number"
-                value={formData.maxStock}
-                onChange={(e) => setFormData({ ...formData, maxStock: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-location">{t("warehouse.location")}</Label>
-              <Input
-                id="edit-location"
-                value={formData.location}
-                onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-category">{t("warehouse.category")}</Label>
-              <Input
-                id="edit-category"
-                value={formData.category}
-                onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-supplier">{t("warehouse.supplier")}</Label>
-              <Input
-                id="edit-supplier"
-                value={formData.supplier}
-                onChange={(e) => setFormData({ ...formData, supplier: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-barcode">{t("warehouse.barcode")}</Label>
-              <Input
-                id="edit-barcode"
-                value={formData.barcode}
-                onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-weight">{t("warehouse.weight")}</Label>
-              <Input
-                id="edit-weight"
-                type="number"
-                step="0.1"
-                value={formData.weight}
-                onChange={(e) => setFormData({ ...formData, weight: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-dimensions">{t("warehouse.dimensions")}</Label>
-              <Input
-                id="edit-dimensions"
-                value={formData.dimensions}
-                onChange={(e) => setFormData({ ...formData, dimensions: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-status">{t("warehouse.status")}</Label>
-              <Select
-                value={formData.status}
-                onValueChange={(value: any) => setFormData({ ...formData, status: value })}
-              >
-                <SelectTrigger className="border-[#0099b5]/20">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="active">{t("status.active")}</SelectItem>
-                  <SelectItem value="inactive">{t("status.inactive")}</SelectItem>
-                  <SelectItem value="discontinued">{t("status.discontinued")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="md:col-span-2">
-              <Label htmlFor="edit-description">{t("warehouse.description")}</Label>
-              <Textarea
-                id="edit-description"
-                value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-                rows={3}
-              />
-            </div>
-            {/* Added conditional inputs for debt quantity and price when editing and payment type is qarz */}
-            {formData.paymentType === "qarz" && (
-              <>
-                <div>
-                  <Label htmlFor="edit-debtQuantity">Qarz soni (dona) *</Label>
-                  <Input
-                    id="edit-debtQuantity"
-                    type="number"
-                    min="0"
-                    value={formData.debtQuantity}
-                    onChange={(e) => setFormData({ ...formData, debtQuantity: e.target.value })}
-                    placeholder="Necha dona qarz"
-                    className="border-orange-200 focus:border-orange-400"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="edit-debtPrice">Qarz narxi (sum) *</Label>
-                  <Input
-                    id="edit-debtPrice"
-                    type="number"
-                    min="0"
-                    value={formData.debtPrice}
-                    onChange={(e) => setFormData({ ...formData, debtPrice: e.target.value })}
-                    placeholder="Qancha sum qarz"
-                    className="border-orange-200 focus:border-orange-400"
-                  />
-                </div>
-              </>
-            )}
+  <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-none">
+    <DialogHeader>
+      <DialogTitle>{t("editProduct")}</DialogTitle>
+      <DialogDescription>{t("editProductDescription")}</DialogDescription>
+    </DialogHeader>
+
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* 🔹 Kodi */}
+      <div>
+        <Label htmlFor="edit-kodi">{t("kodi")} *</Label>
+        <Input
+          id="edit-kodi"
+          required
+          value={formData.kodi}
+          onChange={(e) => setFormData({ ...formData, kodi: e.target.value })}
+          className="border-[#0099b5]/20 focus:border-[#0099b5]"
+        />
+      </div>
+
+      {/* 🔹 Model */}
+      <div>
+        <Label htmlFor="edit-model">{t("model")}</Label>
+        <Input
+          id="edit-model"
+          value={formData.model}
+          onChange={(e) => setFormData({ ...formData, model: e.target.value })}
+          className="border-[#0099b5]/20 focus:border-[#0099b5]"
+        />
+      </div>
+
+      {/* 🔹 Nomi */}
+      <div>
+        <Label htmlFor="edit-nomi">{t("nomi")} *</Label>
+        <Input
+          id="edit-nomi"
+          required
+          value={formData.nomi}
+          onChange={(e) => setFormData({ ...formData, nomi: e.target.value })}
+          className="border-[#0099b5]/20 focus:border-[#0099b5]"
+        />
+      </div>
+
+      {/* 🔹 Kompaniya */}
+      <div>
+        <Label htmlFor="edit-kompaniya">{t("kompaniya")} *</Label>
+        <Input
+          id="edit-kompaniya"
+          required
+          value={formData.kompaniya}
+          onChange={(e) => setFormData({ ...formData, kompaniya: e.target.value })}
+          className="border-[#0099b5]/20 focus:border-[#0099b5]"
+        />
+      </div>
+<div>
+        <Label htmlFor="edit-source">Qayerdan olib kelindi</Label>
+        <Input
+          id="edit-source"
+          value={formData.source}
+          onChange={(e) => setFormData({ ...formData, source: e.target.value })}
+          placeholder="Manba (masalan: Toshkent, Koreya, ...)"
+          className="border-[#0099b5]/20 focus:border-[#0099b5]"
+        />
+      </div>
+      {/* 🔹 To‘lov turi */}
+      <div>
+        <Label htmlFor="edit-paymentType">{t("to'lovTuri")} *</Label>
+        <Select
+          value={formData.paymentType}
+          onValueChange={(value: "naqd" | "qarz") => setFormData({ ...formData, paymentType: value })}
+        >
+          <SelectTrigger className="border-[#0099b5]/20 focus:border-[#0099b5]">
+            <SelectValue placeholder={t("selectPayment")} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="naqd">Naqd (Pul)</SelectItem>
+            <SelectItem value="qarz">Qarz</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+   {/* 🔹 Qarz bo‘lsa, qo‘shimcha inputlar */}
+      {formData.paymentType === "qarz" && (
+        <>
+          <div>
+            <Label htmlFor="edit-debtQuantity">Qarz soni (dona) *</Label>
+            <Input
+              id="edit-debtQuantity"
+              type="number"
+              min="0"
+              value={formData.debtQuantity}
+              onChange={(e) => setFormData({ ...formData, debtQuantity: e.target.value })}
+              placeholder="Necha dona qarz"
+              className="border-orange-200 focus:border-orange-400"
+            />
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditModalOpen(false)} disabled={isSubmitting}>
-              {t("cancel")}
-            </Button>
-            <Button onClick={handleUpdate} className="bg-[#0099b5] hover:bg-[#0099b5]/90" disabled={isSubmitting}>
-              {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
-              {t("update")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+
+          <div>
+            <Label htmlFor="edit-debtPrice">Qarz narxi (so‘m) *</Label>
+            <Input
+              id="edit-debtPrice"
+              type="number"
+              min="0"
+              value={formData.debtPrice}
+              onChange={(e) => setFormData({ ...formData, debtPrice: e.target.value })}
+              placeholder="Qancha so‘m qarz"
+              className="border-orange-200 focus:border-orange-400"
+            />
+          </div>
+        </>
+      )}
+
+      {/* 🔹 Narxi */}
+      <div>
+        <Label htmlFor="edit-narxi">{t("narxi")} *</Label>
+        <Input
+          id="edit-narxi"
+          required
+          value={formData.narxi}
+          onChange={(e) => setFormData({ ...formData, narxi: e.target.value })}
+          className="border-[#0099b5]/20 focus:border-[#0099b5]"
+        />
+      </div>
+<div>
+  <Label htmlFor="edit-profitPercent">Ustama foiz (%)</Label>
+  <Input
+    id="edit-profitPercent"
+    type="number"
+    min="0"
+    max="100"
+    value={formData.profitPercent}
+    onChange={(e) => setFormData({ ...formData, profitPercent: e.target.value })}
+    placeholder="Masalan: 15"
+    className="border-[#0099b5]/20 focus:border-[#0099b5]"
+  />
+  <span className="block mt-2 text-green-700 font-semibold">
+    {formData.narxi && formData.profitPercent
+      ? `Foizli narx: $${calculatedProfitPrice.toFixed(2)}`
+      : "Foiz kiriting"}
+  </span>
+</div>
+      {/* 🔹 Tan narxi */}
+      <div>
+        <Label htmlFor="edit-cost">{t("warehouse.cost")}</Label>
+        <Input
+          id="edit-cost"
+          value={formData.cost}
+          onChange={(e) => setFormData({ ...formData, cost: e.target.value })}
+          className="border-[#0099b5]/20 focus:border-[#0099b5]"
+        />
+      </div>
+
+      {/* 🔹 Qoldiq miqdorlar */}
+      <div>
+        <Label htmlFor="edit-stock">{t("warehouse.stock")}</Label>
+        <Input
+          id="edit-stock"
+          type="number"
+          min="0"
+          value={formData.stock}
+          onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
+          className="border-[#0099b5]/20 focus:border-[#0099b5]"
+        />
+      </div>
+
+      <div>
+        <Label htmlFor="edit-minStock">{t("warehouse.minStock")}</Label>
+        <Input
+          id="edit-minStock"
+          type="number"
+          min="0"
+          value={formData.minStock}
+          onChange={(e) => setFormData({ ...formData, minStock: e.target.value })}
+          className="border-[#0099b5]/20 focus:border-[#0099b5]"
+        />
+      </div>
+
+      <div>
+        <Label htmlFor="edit-maxStock">{t("warehouse.maxStock")}</Label>
+        <Input
+          id="edit-maxStock"
+          type="number"
+          min="0"
+          value={formData.maxStock}
+          onChange={(e) => setFormData({ ...formData, maxStock: e.target.value })}
+          className="border-[#0099b5]/20 focus:border-[#0099b5]"
+        />
+      </div>
+
+      {/* 🔹 Joylashuv, kategoriya, ta’minotchi */}
+      <div>
+        <Label htmlFor="edit-location">{t("warehouse.location")}</Label>
+        <Input
+          id="edit-location"
+          value={formData.location}
+          onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+          className="border-[#0099b5]/20 focus:border-[#0099b5]"
+        />
+      </div>
+
+      <div>
+        <Label htmlFor="edit-category">{t("warehouse.category")}</Label>
+        <Input
+          id="edit-category"
+          value={formData.category}
+          onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+          className="border-[#0099b5]/20 focus:border-[#0099b5]"
+        />
+      </div>
+
+      <div>
+        <Label htmlFor="edit-supplier">{t("warehouse.supplier")}</Label>
+        <Input
+          id="edit-supplier"
+          value={formData.supplier}
+          onChange={(e) => setFormData({ ...formData, supplier: e.target.value })}
+          className="border-[#0099b5]/20 focus:border-[#0099b5]"
+        />
+      </div>
+
+      {/* 🔹 Qo‘shimcha ma’lumotlar */}
+      <div>
+        <Label htmlFor="edit-barcode">{t("warehouse.barcode")}</Label>
+        <Input
+          id="edit-barcode"
+          value={formData.barcode}
+          onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
+          className="border-[#0099b5]/20 focus:border-[#0099b5]"
+        />
+      </div>
+
+      <div>
+        <Label htmlFor="edit-weight">{t("warehouse.weight")}</Label>
+        <Input
+          id="edit-weight"
+          type="number"
+          step="0.1"
+          min="0"
+          value={formData.weight}
+          onChange={(e) => setFormData({ ...formData, weight: e.target.value })}
+          className="border-[#0099b5]/20 focus:border-[#0099b5]"
+        />
+      </div>
+
+      <div>
+        <Label htmlFor="edit-dimensions">{t("warehouse.dimensions")}</Label>
+        <Input
+          id="edit-dimensions"
+          value={formData.dimensions}
+          onChange={(e) => setFormData({ ...formData, dimensions: e.target.value })}
+          className="border-[#0099b5]/20 focus:border-[#0099b5]"
+        />
+      </div>
+
+      {/* 🔹 Status */}
+      <div>
+        <Label htmlFor="edit-status">{t("warehouse.status")}</Label>
+        <Select
+          value={formData.status}
+          onValueChange={(value) => setFormData({ ...formData, status: value })}
+        >
+          <SelectTrigger className="border-[#0099b5]/20 focus:border-[#0099b5]">
+            <SelectValue placeholder={t("selectStatus")} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="active">{t("status.active")}</SelectItem>
+            <SelectItem value="inactive">{t("status.inactive")}</SelectItem>
+            <SelectItem value="discontinued">{t("status.discontinued")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* 🔹 Izoh */}
+      <div className="md:col-span-2">
+        <Label htmlFor="edit-description">{t("warehouse.description")}</Label>
+        <Textarea
+          id="edit-description"
+          value={formData.description}
+          onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+          className="border-[#0099b5]/20 focus:border-[#0099b5]"
+          rows={3}
+        />
+      </div>
+
+   
+    </div>
+
+    {/* 🔹 Pastki tugmalar */}
+    <DialogFooter className="mt-4">
+      <Button
+        variant="outline"
+        onClick={() => setIsEditModalOpen(false)}
+        disabled={isSubmitting}
+      >
+        {t("cancel")}
+      </Button>
+      <Button
+        onClick={handleUpdate}
+        className="bg-[#0099b5] hover:bg-[#0099b5]/90 text-white"
+        disabled={isSubmitting}
+      >
+        {isSubmitting ? (
+          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+        ) : (
+          <Save className="h-4 w-4 mr-2" />
+        )}
+        {t("update")}
+      </Button>
+    </DialogFooter>
+  </DialogContent>
+</Dialog>
+
 
       <Dialog open={isSellModalOpen} onOpenChange={setIsSellModalOpen}>
         <DialogContent className="sm:max-w-md">
@@ -4149,6 +4322,16 @@ const handleUpdateExchangeRate = () => {
               />
             </div>
             <div>
+  <Label htmlFor="source">Qayerdan olib kelindi</Label>
+  <Input
+    id="source"
+    value={formData.source}
+    onChange={(e) => setFormData({ ...formData, source: e.target.value })}
+    placeholder="Manba (masalan: Toshkent, Koreya, ...)"
+    className="border-[#0099b5]/20 focus:border-[#0099b5]"
+  />
+</div>
+            <div>
               <Label htmlFor="paymentType">To'lov turi *</Label>
               <Select
                 value={formData.paymentType}
@@ -4202,6 +4385,24 @@ const handleUpdateExchangeRate = () => {
                 className="border-[#0099b5]/20 focus:border-[#0099b5]"
               />
             </div>
+            <div>
+  <Label htmlFor="profitPercent">Ustama foiz (%)</Label>
+  <Input
+    id="profitPercent"
+    type="number"
+    min="0"
+    max="100"
+    value={formData.profitPercent}
+    onChange={(e) => setFormData({ ...formData, profitPercent: e.target.value })}
+    placeholder="Masalan: 15"
+    className="border-[#0099b5]/20 focus:border-[#0099b5]"
+  />
+  <span className="block mt-2 text-green-700 font-semibold">
+    {formData.narxi && formData.profitPercent
+      ? `Foizli narx: $${calculatedProfitPrice.toFixed(2)}`
+      : "Foiz kiriting"}
+  </span>
+</div>
             <div>
               <Label htmlFor="cost">{t("warehouse.cost")}</Label>
               <Input
