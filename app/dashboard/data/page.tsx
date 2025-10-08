@@ -8,6 +8,7 @@ import { useLanguage } from "@/contexts/language-context"
 import { useToast } from "@/components/ui/toast"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Dialog,
@@ -1137,6 +1138,21 @@ const handleEdit = (row: Product) => {
     const sold = product.sold || 0
     return sum + sold * price
   }, 0)
+  const totalProfit = data.reduce((sum, product) => {
+  const price = Number.parseFloat(product.narxi?.toString().replace(/[^0-9.-]/g, "")) || 0
+  const cost = Number.parseFloat(product.cost?.toString().replace(/[^0-9.-]/g, "")) || 0
+  const sold = product.sold || 0
+  const profitPercent = Number(product.profitPercent) || 0
+
+  // Agar cost bor bo‘lsa, narx - cost, aks holda profitPercent ishlatiladi
+  let profit = 0
+  if (cost > 0) {
+    profit = (price - cost) * sold
+  } else if (profitPercent > 0) {
+    profit = (price * profitPercent / 100) * sold
+  }
+  return sum + profit
+}, 0)
 
   const averagePrice =
     data.length > 0
@@ -1764,15 +1780,24 @@ const handleUpdateExchangeRate = () => {
           </CardContent>
         </Card>
 
-        <Card className="border-0 shadow-lg bg-gradient-to-br from-purple-50 to-purple-100 hover:shadow-xl transition-all duration-300">
-          <CardContent className="p-3 lg:p-6 text-center">
-            <div className="p-2 lg:p-3 bg-purple-500 rounded-full w-fit mx-auto mb-2 lg:mb-4">
-              <DollarSign className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
-            </div>
-            <p className="text-xs lg:text-sm font-medium text-purple-700">{t("totalRevenue")}</p>
-            <p className="text-lg lg:text-2xl font-bold text-purple-900">${totalRevenue.toLocaleString()}</p>
-          </CardContent>
-        </Card>
+          <Card className="border-0 shadow-lg bg-gradient-to-br from-purple-50 to-purple-100 hover:shadow-xl transition-all duration-300">
+    <CardContent className="p-3 lg:p-6 text-center">
+      <div className="p-2 lg:p-3 bg-purple-500 rounded-full w-fit mx-auto mb-2 lg:mb-4">
+        <DollarSign className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
+      </div>
+      <p className="text-xs lg:text-sm font-medium text-purple-700">Jami daromad</p>
+      <p className="text-lg lg:text-2xl font-bold text-purple-900">${totalRevenue.toLocaleString()}</p>
+    </CardContent>
+  </Card>
+  <Card className="border-0 shadow-lg bg-gradient-to-br from-green-50 to-green-100 hover:shadow-xl transition-all duration-300">
+    <CardContent className="p-3 lg:p-6 text-center">
+      <div className="p-2 lg:p-3 bg-green-500 rounded-full w-fit mx-auto mb-2 lg:mb-4">
+        <TrendingUp className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
+      </div>
+      <p className="text-xs lg:text-sm font-medium text-green-700">Jami foyda</p>
+      <p className="text-lg lg:text-2xl font-bold text-green-900">${totalProfit.toLocaleString()}</p>
+    </CardContent>
+  </Card>
 
         <Card className="border-0 shadow-lg bg-gradient-to-br from-orange-50 to-orange-100 hover:shadow-xl transition-all duration-300">
           <CardContent className="p-3 lg:p-6 text-center">
@@ -2219,24 +2244,24 @@ const handleUpdateExchangeRate = () => {
         : "-"}
     </span>
     {/* Foizli narx (USD va so'mda) */}
-    <span className="font-semibold text-blue-700 text-sm">
-      {row.narxi && row.profitPercent && !isNaN(Number(row.narxi.toString().replace(/,/g, ""))) && !isNaN(Number(row.profitPercent)) && Number(row.profitPercent) > 0
-        ? <>
-            Foizli narx: ${(
-              Number(row.narxi.toString().replace(/,/g, "")) +
-              (Number(row.narxi.toString().replace(/,/g, "")) * Number(row.profitPercent) / 100)
-            ).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            {" "}
-            ({row.profitPercent}%)
-            <br />
-            <span className="text-xs text-blue-600">
-              {(
-                (Number(row.narxi.toString().replace(/,/g, "")) + (Number(row.narxi.toString().replace(/,/g, "")) * Number(row.profitPercent) / 100)) * exchangeRate
-              ).toLocaleString()} so'm
-            </span>
-          </>
-        : "Foiz kiritilmagan"}
-    </span>
+<span className="font-semibold text-blue-700 text-sm">
+  {row.narxi && row.profitPercent && !isNaN(Number(row.narxi.toString().replace(/,/g, ""))) && !isNaN(Number(row.profitPercent)) && Number(row.profitPercent) > 0
+    ? <>
+        Foizli narx: ${(
+          Number(row.narxi.toString().replace(/,/g, "")) +
+          (Number(row.narxi.toString().replace(/,/g, "")) * Number(row.profitPercent) / 100)
+        ).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+        {" "}
+        ({row.profitPercent}%)
+        <br />
+        <span className="text-xs text-blue-600">
+          {(
+            (Number(row.narxi.toString().replace(/,/g, "")) + (Number(row.narxi.toString().replace(/,/g, "")) * Number(row.profitPercent) / 100)) * exchangeRate
+          ).toLocaleString(undefined, { maximumFractionDigits: 0 })} so'm
+        </span>
+      </>
+    : "Foiz kiritilmagan"}
+</span>
   </div>
 </td>
                         
@@ -2835,19 +2860,24 @@ const handleUpdateExchangeRate = () => {
                   </CardContent>
                 </Card>
 
-                <Card className="bg-gradient-to-br from-green-50 to-green-100">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-green-700 font-medium">Jami summa</p>
-                        <p className="text-2xl font-bold text-green-900">${totalRevenue.toLocaleString()}</p>
-                      </div>
-                      <div className="p-3 bg-green-500 rounded-full">
-                        <DollarSign className="h-6 w-6 text-white" />
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+                  <Card className="border-0 shadow-lg bg-gradient-to-br from-purple-50 to-purple-100 hover:shadow-xl transition-all duration-300">
+    <CardContent className="p-3 lg:p-6 text-center">
+      <div className="p-2 lg:p-3 bg-purple-500 rounded-full w-fit mx-auto mb-2 lg:mb-4">
+        <DollarSign className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
+      </div>
+      <p className="text-xs lg:text-sm font-medium text-purple-700">Jami daromad</p>
+      <p className="text-lg lg:text-2xl font-bold text-purple-900">${totalRevenue.toLocaleString()}</p>
+    </CardContent>
+  </Card>
+  <Card className="border-0 shadow-lg bg-gradient-to-br from-green-50 to-green-100 hover:shadow-xl transition-all duration-300">
+    <CardContent className="p-3 lg:p-6 text-center">
+      <div className="p-2 lg:p-3 bg-green-500 rounded-full w-fit mx-auto mb-2 lg:mb-4">
+        <TrendingUp className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
+      </div>
+      <p className="text-xs lg:text-sm font-medium text-green-700">Jami foyda</p>
+      <p className="text-lg lg:text-2xl font-bold text-green-900">${totalProfit.toLocaleString()}</p>
+    </CardContent>
+  </Card>
 
                 <Card className="bg-gradient-to-br from-purple-50 to-purple-100">
                   <CardContent className="p-4">
@@ -3529,6 +3559,10 @@ const handleUpdateExchangeRate = () => {
                       <span className="font-medium">{viewingProduct.category || "-"}</span>
                     </div>
                     <div className="flex justify-between">
+            <span className="text-gray-600">Qayerdan olib kelingan:</span>
+            <span className="font-medium">{viewingProduct.source || "-"}</span>
+          </div>
+                    <div className="flex justify-between">
                       <span className="text-gray-600">{t("warehouse.status")}:</span>
                       <Badge
                         className={cn(
@@ -3553,6 +3587,23 @@ const handleUpdateExchangeRate = () => {
                       <span className="font-bold text-green-600">{viewingProduct.narxi}</span>
                     </div>
                     <div className="flex justify-between">
+            <span className="text-gray-600">Ustama foiz (%):</span>
+            <span className="font-medium">
+              {viewingProduct.profitPercent ? `${viewingProduct.profitPercent}%` : "-"}
+            </span>
+          </div>
+          {viewingProduct.narxi && viewingProduct.profitPercent && !isNaN(Number(viewingProduct.narxi.toString().replace(/,/g, ""))) && !isNaN(Number(viewingProduct.profitPercent)) && Number(viewingProduct.profitPercent) > 0 && (
+            <div className="flex justify-between">
+              <span className="text-gray-600">Foizli narx:</span>
+              <span className="font-bold text-blue-700">
+                ${(
+                  Number(viewingProduct.narxi.toString().replace(/,/g, "")) +
+                  (Number(viewingProduct.narxi.toString().replace(/,/g, "")) * Number(viewingProduct.profitPercent) / 100)
+                ).toLocaleString(undefined, { maximumFractionDigits: 0 })} ({viewingProduct.profitPercent}%)
+              </span>
+            </div>
+          )}  
+                    <div className="flex justify-between">
                       <span className="text-gray-600">{t("warehouse.cost")}:</span>
                       <span className="font-medium">{viewingProduct.cost || "-"}</span>
                     </div>
@@ -3562,6 +3613,8 @@ const handleUpdateExchangeRate = () => {
                     </div>
                   </div>
                 </div>
+
+
 
                 <div className="p-4 bg-orange-50 rounded-lg">
                   <h3 className="font-semibold text-gray-900 mb-3">Warehouse Information</h3>
