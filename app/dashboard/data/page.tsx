@@ -104,6 +104,7 @@ import {
 import { DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Timestamp } from "firebase/firestore"
+import { toast } from "@/hooks/use-toast"
 
 export default function DataPage() {
   const { user, loading } = useAuth()
@@ -1530,7 +1531,67 @@ const printReceipt = () => {
         variant: "destructive",
       })
     }
+  }// Export selected products to Excel
+const handleExportSelected = () => {
+  if (selectedProducts.size === 0) {
+    toast({
+      title: "Ogohlantirish", 
+      description: "Avval mahsulotlarni tanlang",
+      variant: "warning"
+    })
+    return
   }
+
+  // Get selected products data
+  const selectedData = data.filter(product => selectedProducts.has(product.id))
+
+  // Prepare data for Excel
+  const exportData = selectedData.map(product => ({
+    'MANBA': product.source || '-',
+    'KOD': product.kodi,
+    'MODEL': product.model || '-',
+    'NOMI': product.nomi,
+    'KOMPANIYA': product.kompaniya,
+    'JOYLASHUV': product.location || '-',
+    'NARXI ($)': product.narxi,
+    "NARXI (SO'M)": Number(product.narxi.replace(/[^\d.]/g, '')) * exchangeRate,
+    'OMBORDA': product.stock || 0,
+    'MIN.SONI': product.minStock || 10,
+    'MAX.SONI': product.maxStock || 1000,
+    'KATEGORIYA': product.category || '-',
+    'HOLAT': product.status || 'active',
+    'SOTILGAN': product.sold || 0,
+    'FOIZ': product.profitPercent || 0,
+    'FOIZLI NARX ($)': (() => {
+      const price = Number(product.narxi.replace(/[^\d.]/g, ''))
+      const percent = Number(product.profitPercent) || 0
+      return percent > 0 ? price + (price * percent / 100) : price
+    })(),
+    "FOIZLI NARX (SO'M)": (() => {
+      const price = Number(product.narxi.replace(/[^\d.]/g, ''))
+      const percent = Number(product.profitPercent) || 0
+      const profitPrice = percent > 0 ? price + (price * percent / 100) : price
+      return profitPrice * exchangeRate
+    })()
+  }))
+
+  // Create Excel workbook
+  const ws = XLSX.utils.json_to_sheet(exportData)
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, "Tanlangan Mahsulotlar")
+  
+  // Generate filename with current date
+  const fileName = `tanlangan_mahsulotlar_${new Date().toISOString().split('T')[0]}.xlsx`
+
+  // Download Excel file
+  XLSX.writeFile(wb, fileName)
+
+  toast({
+    title: "Muvaffaqiyatli",
+    description: `${selectedProducts.size} ta mahsulot eksport qilindi`,
+    variant: "success"
+  })
+}
 
   // Render function for the loans table with product details
   const renderLoansTable = () => {
@@ -2079,6 +2140,14 @@ const printReceipt = () => {
                         Mahsulotlarni sotish ({selectedProducts.size}) {/* Sell Products ({count}) */}
                       </Button>
                     )}
+                    <Button 
+  onClick={handleExportSelected} 
+  disabled={selectedProducts.size === 0}
+  className="bg-green-600 hover:bg-green-700 text-white"
+>
+  <Download className="h-4 w-4 mr-2" />
+  Tanlangan mahsulotlarni eksport qilish ({selectedProducts.size})
+</Button>
                     <Button
                       onClick={() => setIsAddModalOpen(true)}
                       className="bg-[#0099b5] hover:bg-[#0099b5]/90 text-white h-9 lg:h-10 text-sm"
