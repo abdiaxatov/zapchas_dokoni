@@ -2685,51 +2685,120 @@ const printReceipt = () => {
 
         <TabsContent value="statistics" className="space-y-4 lg:space-y-6">
           {/* Enhanced Statistics Overview Cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-6">
-            <Card className="border-0 shadow-lg bg-gradient-to-br from-emerald-50 to-emerald-100 hover:shadow-xl transition-all duration-300">
-              <CardContent className="p-4 lg:p-6 text-center">
-                <div className="p-2 lg:p-3 bg-emerald-500 rounded-full w-fit mx-auto mb-3 lg:mb-4">
-                  <DollarSign className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
-                </div>
-                <p className="text-xs lg:text-sm font-medium text-emerald-700">{t("stats.averagePrice")}</p>
-                <p className="text-lg lg:text-2xl font-bold text-emerald-900">
-                  ${isNaN(averagePrice) ? "0.00" : averagePrice.toFixed(2)}
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card className="border-0 shadow-lg bg-gradient-to-br from-red-50 to-red-100 hover:shadow-xl transition-all duration-300">
-              <CardContent className="p-4 lg:p-6 text-center">
-                <div className="p-2 lg:p-3 bg-red-500 rounded-full w-fit mx-auto mb-3 lg:mb-4">
-                  <AlertCircle className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
-                </div>
-                <p className="text-xs lg:text-sm font-medium text-red-700">{t("stats.outOfStockProducts")}</p>
-                <p className="text-lg lg:text-2xl font-bold text-red-900">{outOfStockProducts.length}</p>
-              </CardContent>
-            </Card>
-
-            <Card className="border-0 shadow-lg bg-gradient-to-br from-indigo-50 to-indigo-100 hover:shadow-xl transition-all duration-300">
-              <CardContent className="p-4 lg:p-6 text-center">
-                <div className="p-2 lg:p-3 bg-indigo-500 rounded-full w-fit mx-auto mb-3 lg:mb-4">
-                  <Package className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
-                </div>
-                <p className="text-xs lg:text-sm font-medium text-indigo-700">{t("stats.totalStock")}</p>
-                <p className="text-lg lg:text-2xl font-bold text-indigo-900">
-                  {data.reduce((sum, product) => sum + (product.stock || 0), 0).toLocaleString()}
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card className="border-0 shadow-lg bg-gradient-to-br from-amber-50 to-amber-100 hover:shadow-xl transition-all duration-300">
-              <CardContent className="p-4 lg:p-6 text-center">
-                <div className="p-2 lg:p-3 bg-amber-500 rounded-full w-fit mx-auto mb-3 lg:mb-4">
-                  <TrendingUp className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
-                </div>
-                <p className="text-xs lg:text-sm font-medium text-amber-700">{t("stats.inventoryValue")}</p>
-                <p className="text-lg lg:text-2xl font-bold text-amber-900">${inventoryValue.toLocaleString()}</p>
-              </CardContent>
-            </Card>
+           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-6">
+    {/* Jami sotuvlar (barchasi) */}
+    <Card className="border-0 shadow-lg bg-gradient-to-br from-blue-50 to-blue-100 hover:shadow-xl transition-all duration-300">
+      <CardContent className="p-4 lg:p-6">
+        <div className="flex items-center justify-between mb-3">
+          <div className="p-2 lg:p-3 bg-blue-500 rounded-full">
+            <Receipt className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
           </div>
+          <p className="text-xs lg:text-sm font-medium text-blue-700">Jami sotuvlar</p>
+        </div>
+        <div className="space-y-1">
+          <p className="text-2xl font-bold text-blue-900">{filteredSales.length}</p>
+          <p className="text-sm text-blue-700">{totalItemsSold} ta mahsulot</p>
+        </div>
+      </CardContent>
+    </Card>
+
+    {/* Jami daromad va foydalar */}
+    <Card className="border-0 shadow-lg bg-gradient-to-br from-green-50 to-green-100 hover:shadow-xl transition-all duration-300">
+      <CardContent className="p-4 lg:p-6">
+        <div className="flex items-center justify-between mb-3">
+          <div className="p-2 lg:p-3 bg-green-500 rounded-full">
+            <DollarSign className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
+          </div>
+          <p className="text-xs lg:text-sm font-medium text-green-700">Jami daromad</p>
+        </div>
+        <div className="space-y-1">
+          <p className="text-2xl font-bold text-green-900">
+            ${totalRevenue.toLocaleString()}
+          </p>
+          <p className="text-sm text-green-700">
+            {(totalRevenue * exchangeRate).toLocaleString()} so'm
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+
+    {/* Foizli jami narx */}
+    <Card className="border-0 shadow-lg bg-gradient-to-br from-blue-50 to-blue-100 hover:shadow-xl transition-all duration-300">
+      <CardContent className="p-4 lg:p-6">
+        <div className="flex items-center justify-between mb-3">
+          <div className="p-2 lg:p-3 bg-blue-500 rounded-full">
+            <TrendingUp className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
+          </div>
+          <p className="text-xs lg:text-sm font-medium text-blue-700">Foizli jami narx</p>
+        </div>
+        <div className="space-y-1">
+          {(() => {
+            const totalProfitUSD = filteredSales.reduce((sum, sale) => 
+              sum + sale.items.reduce((itemSum, item) => {
+                const percent = Number(item.profitPercent) || 0
+                const base = Number(item.price)
+                const profit = percent > 0 ? base + (base * percent) / 100 : base
+                return itemSum + profit * item.quantity
+              }, 0), 0)
+            const totalProfitUZS = totalProfitUSD * exchangeRate
+            const avgPercent = (() => {
+              const percents = filteredSales.flatMap(sale => 
+                sale.items
+                  .filter(i => Number(i.profitPercent) > 0)
+                  .map(i => Number(i.profitPercent))
+              )
+              return percents.length > 0 
+                ? Math.round(percents.reduce((a,b) => a + b, 0) / percents.length) 
+                : 0
+            })()
+            return (
+              <>
+                <p className="text-2xl font-bold text-blue-900">
+                  ${totalProfitUSD.toLocaleString()}
+                </p>
+                <p className="text-sm text-blue-700">
+                  {totalProfitUZS.toLocaleString()} so'm
+                </p>
+              </>
+            )
+          })()}
+        </div>
+      </CardContent>
+    </Card>
+
+    {/* Faqat foizdan foyda */}
+    <Card className="border-0 shadow-lg bg-gradient-to-br from-green-50 to-green-100 hover:shadow-xl transition-all duration-300">
+      <CardContent className="p-4 lg:p-6">
+        <div className="flex items-center justify-between mb-3">
+          <div className="p-2 lg:p-3 bg-green-500 rounded-full">
+            <DollarSign className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
+          </div>
+          <p className="text-xs lg:text-sm font-medium text-green-700">Foyda (foizdan)</p>
+        </div>
+        <div className="space-y-1">
+          {(() => {
+            const profitOnly = filteredSales.reduce((sum, sale) =>
+              sum + sale.items.reduce((itemSum, item) => {
+                const p = Number(item.profitPercent) || 0
+                const base = Number(item.price)
+                return itemSum + (p > 0 ? (base * p / 100) * item.quantity : 0)
+              }, 0), 0)
+            const profitOnlyUZS = profitOnly * exchangeRate
+            return (
+              <>
+                <p className="text-2xl font-bold text-green-900">
+                  ${profitOnly.toLocaleString()}
+                </p>
+                <p className="text-sm text-green-700">
+                  {profitOnlyUZS.toLocaleString()} so'm
+                </p>
+              </>
+            )
+          })()}
+        </div>
+      </CardContent>
+    </Card>
+  </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
             {/* Company Performance Chart */}
