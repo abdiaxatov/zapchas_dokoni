@@ -421,75 +421,91 @@ export default function DataPage() {
     }
     setSelectedProducts(newSelected)
   }
+const handleBulkSell = async () => {
+  try {
+    const selectedProductsList = Array.from(selectedProducts)
+      .map((id) => data.find((p) => p.id === id))
+      .filter((p): p is Product => p !== undefined)
 
-  const handleBulkSell = async () => {
-    try {
-      const selectedProductsList = Array.from(selectedProducts)
-        .map((id) => data.find((p) => p.id === id))
-        .filter((p): p is Product => p !== undefined)
+    if (selectedProductsList.length === 0) {
+      showToast({
+        title: t("common.error"),
+        description: "Iltimos, sotish uchun mahsulotlarni tanlang",
+        variant: "destructive",
+      })
+      return
+    }
 
-      if (selectedProductsList.length === 0) {
+    // Validate quantities
+    for (const product of selectedProductsList) {
+      const quantity = bulkSellQuantities[product.id!] || 0
+      if (quantity <= 0) {
         showToast({
           title: t("common.error"),
-          description: "Iltimos, sotish uchun mahsulotlarni tanlang",
+          description: `${product.nomi} uchun miqdor kiriting`,
           variant: "destructive",
         })
         return
       }
-
-      // Validate quantities
-      for (const product of selectedProductsList) {
-        const quantity = bulkSellQuantities[product.id!] || 0
-        if (quantity <= 0) {
-          showToast({
-            title: t("common.error"),
-            description: `${product.nomi} uchun miqdor kiriting`,
-            variant: "destructive",
-          })
-          return
-        }
-        if (quantity > (product.stock || 0)) {
-          showToast({
-            title: t("common.error"),
-            description: `${product.nomi} uchun yetarli mahsulot yo'q`,
-            variant: "destructive",
-          })
-          return
-        }
-      }
-
-      // If selling as loan, validate customer data
-      if (sellAsLoan) {
-        if (!loanCustomerData.customerName.trim()) {
-          showToast({
-            title: t("common.error"),
-            description: t("loan.customerName") + " kiritilishi shart",
-            variant: "destructive",
-          })
-          return
-        }
-      }
-
-      // Process sales
-      const saleItems = []
-      for (const product of selectedProductsList) {
-        const quantity = bulkSellQuantities[product.id!]
-        await sellProduct(product.id!, quantity)
-
-        const price = Number.parseFloat(product.narxi.replace(/[^\d.]/g, "")) || 0
-        saleItems.push({
-          productId: product.id!,
-          productName: product.nomi,
-          productCode: product.kodi,
-          company: product.kompaniya,
-          model: product.model, // Added model here
-          quantity,
-          price,
-          total: price * quantity,
-          location: product.location,
-          profitPercent: product.profitPercent || 0,
+      if (quantity > (product.stock || 0)) {
+        showToast({
+          title: t("common.error"),
+          description: `${product.nomi} uchun yetarli mahsulot yo'q`,
+          variant: "destructive",
         })
+        return
       }
+    }
+
+    // If selling as loan, validate customer data
+    if (sellAsLoan) {
+      if (!loanCustomerData.customerName.trim()) {
+        showToast({
+          title: t("common.error"),
+          description: t("loan.customerName") + " kiritilishi shart",
+          variant: "destructive",
+        })
+        return
+      }
+    }
+
+    // Process sales
+    const saleItems = []
+    for (const product of selectedProductsList) {
+      const quantity = bulkSellQuantities[product.id!]
+      await sellProduct(product.id!, quantity)
+
+      const price = Number.parseFloat(product.narxi.replace(/[^\d.]/g, "")) || 0
+      saleItems.push({
+        productId: product.id!,
+        productName: product.nomi,
+        productCode: product.kodi,
+        company: product.kompaniya,
+        model: product.model, // Added model here
+        quantity,
+        price,
+        total: price * quantity,
+        location: product.location,
+        profitPercent: product.profitPercent || 0,
+      })
+    }
+
+    // Calculate totals after saleItems is populated
+    const totalAmountUSD = saleItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
+    const totalAmountUZS = totalAmountUSD * exchangeRate
+
+    const totalProfitUSD = saleItems.reduce((sum, item) => {
+      const percent = Number(item.profitPercent) || 0
+      const price = Number(item.price)
+      const profitPrice = percent > 0 ? price + (price * percent) / 100 : price
+      return sum + profitPrice * item.quantity
+    }, 0)
+    const totalProfitUZS = totalProfitUSD * exchangeRate
+
+    const avgProfitPercent = (() => {
+      const percents = saleItems.filter(i => Number(i.profitPercent) > 0).map(i => Number(i.profitPercent))
+      return percents.length > 0 ? Math.round(percents.reduce((a, b) => a + b, 0) / percents.length) : 0
+    })()
 
       // Create receipt data
       const totalAmount = saleItems.reduce((sum, item) => sum + item.total, 0)
@@ -506,6 +522,7 @@ export default function DataPage() {
         items: saleItems,
         totalAmount,
         receiptNumber,
+        profitPercent: 0, // Umumiy foyda foizi (hozircha 0)
         saleDate: Timestamp.now(),
         isLoan: sellAsLoan,
         amountPaid: sellAsLoan ? 0 : totalAmount,
@@ -520,29 +537,34 @@ export default function DataPage() {
       const transactionId = await saveSaleTransaction(transactionData)
 
       // If loan, create loan record
-      if (sellAsLoan) {
-        await createLoan({
-          customerName: loanCustomerData.customerName,
-          customerPhone: loanCustomerData.customerPhone,
-          customerAddress: loanCustomerData.customerAddress,
-          transactionId,
-          receiptNumber,
-          totalAmount,
-          amountPaid: 0,
-          amountRemaining: totalAmount,
-          loanDate: Timestamp.now(),
-          dueDate: loanCustomerData.dueDate ? Timestamp.fromDate(new Date(loanCustomerData.dueDate)) : undefined,
-          status: "pending",
-          paymentHistory: [],
-          notes: loanCustomerData.notes,
-        })
-
-        showToast({
-          title: t("common.success"),
-          description: t("loan.loanCreated"),
-          variant: "success",
-        })
-      }
+     if (sellAsLoan) {
+  await createLoan({
+    customerName: loanCustomerData.customerName,
+    customerPhone: loanCustomerData.customerPhone,
+    customerAddress: loanCustomerData.customerAddress,
+    transactionId,
+    receiptNumber,
+    totalAmount: totalAmountUSD,
+    amountPaid: 0,
+    amountRemaining: totalAmountUSD,
+    profitPercent: avgProfitPercent,
+    loanDate: Timestamp.now(),
+    dueDate: loanCustomerData.dueDate ? Timestamp.fromDate(new Date(loanCustomerData.dueDate)) : undefined,
+    status: "pending",
+    paymentHistory: [],
+    notes: loanCustomerData.notes,
+    items: saleItems, // <-- har bir itemda profitPercent bor
+    // 🔽 Qo‘shimcha statistik maydonlar
+    totalAmountUZS,
+    totalProfitUSD,
+    totalProfitUZS,
+  })
+  showToast({
+    title: t("common.success"),
+    description: t("loan.loanCreated"),
+    variant: "success",
+  })
+}
 
       setReceiptData(null)
       setIsBulkSellModalOpen(false)
@@ -667,6 +689,7 @@ const printReceipt = () => {
       debtQuantity: "",
       debtPrice: "",
       profitPercent: "",
+      profitPrice: "",
     })
   }
 
@@ -1534,45 +1557,96 @@ const printReceipt = () => {
                       </div>
 
                       {/* Product Details */}
-                      {items.length > 0 && (
-                        <div className="mt-3 p-3 bg-gray-50 rounded-lg">
-                          <p className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
-                            <Package className="h-3 w-3" />
-                            Mahsulotlar:
-                          </p>
-                          <div className="space-y-1.5">
-                            {items.map((item, idx) => (
-                              <div key={idx} className="text-sm">
-                                <div className="flex items-start justify-between gap-2">
-                                  <div className="flex-1">
-                                    <p className="font-medium text-gray-900">{item.productName}</p>
-                                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-600 mt-0.5">
-                                      <span>Kod: {item.productCode}</span>
-                                      <span>•</span>
-                                      <span>{item.company}</span>
-                                      {item.location && (
-                                        <>
-                                          <span>•</span>
-                                          <span className="flex items-center gap-0.5">
-                                            <MapPin className="h-3 w-3" />
-                                            {item.location}
-                                          </span>
-                                        </>
-                                      )}
-                                    </div>
-                                  </div>
-                                  <div className="text-right whitespace-nowrap">
-                                    <p className="text-xs text-gray-600">
-                                      {item.quantity} x ${item.price.toFixed(2)}
-                                    </p>
-                                    <p className="font-semibold text-sm">${(item.quantity * item.price).toFixed(2)}</p>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
+                     {items.length > 0 && (
+            <div className="mt-3 p-3 bg-gray-50 rounded-lg">
+              <p className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
+                <Package className="h-3 w-3" />
+                Mahsulotlar:
+              </p>
+              <div className="space-y-1.5">
+                {items.map((item, idx) => {
+                  const profitPercent = Number(item.profitPercent) || 0
+                  const basePrice = Number(item.price)
+                  const profitPrice = profitPercent > 0 ? basePrice + (basePrice * profitPercent) / 100 : basePrice
+                  const totalBasePrice = basePrice * item.quantity
+                  const totalProfitPrice = profitPrice * item.quantity
+                  const profitOnly = profitPercent > 0 ? (basePrice * profitPercent / 100) * item.quantity : 0
+
+                  return (
+                    <div key={idx} className="text-sm">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1">
+                          <p className="font-medium text-gray-900">{item.productName}</p>
+                          <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-600 mt-0.5">
+                            <span>Kod: {item.productCode}</span>
+                            <span>•</span>
+                            <span>{item.company}</span>
+                            {item.location && (
+                              <>
+                                <span>•</span>
+                                <span className="flex items-center gap-0.5">
+                                  <MapPin className="h-3 w-3" />
+                                  {item.location}
+                                </span>
+                              </>
+                            )}
                           </div>
                         </div>
-                      )}
+                        <div className="text-right">
+                          <div className="text-xs text-gray-600">
+                            {item.quantity} x ${basePrice.toLocaleString()}
+                          </div>
+                          <div className="font-semibold text-sm">
+                            ${totalBasePrice.toLocaleString()}
+                          </div>
+                          {profitPercent > 0 && (
+                            <>
+                              <div className="text-xs text-blue-700 mt-1">
+                                Foizli narx: ${totalProfitPrice.toLocaleString()} ({profitPercent}%)
+                              </div>
+                              <div className="text-xs text-green-700">
+                                Foyda: ${profitOnly.toLocaleString()}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+                
+                {/* Total Profit Summary */}
+                <div className="mt-3 pt-3 border-t border-gray-200">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-semibold text-blue-700">
+                      Jami foizli narx:
+                    </span>
+                    <span className="font-bold text-blue-900">
+                      ${items.reduce((sum, item) => {
+                        const percent = Number(item.profitPercent) || 0
+                        const base = Number(item.price)
+                        const profit = percent > 0 ? base + (base * percent) / 100 : base
+                        return sum + profit * item.quantity
+                      }, 0).toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center mt-1">
+                    <span className="text-sm font-semibold text-green-700">
+                      Jami foyda:
+                    </span>
+                    <span className="font-bold text-green-700">
+                      ${items.reduce((sum, item) => {
+                        const p = Number(item.profitPercent) || 0
+                        const base = Number(item.price)
+                        return sum + (p > 0 ? (base * p / 100) * item.quantity : 0)
+                      }, 0).toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
 
                       {/* Financial Info */}
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
@@ -3377,6 +3451,7 @@ const printReceipt = () => {
 </TabsContent>
 
         <TabsContent value="history" className="space-y-4 lg:space-y-6">
+
           <Card className="border-0 shadow-lg">
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
@@ -3757,6 +3832,7 @@ const printReceipt = () => {
               )}
             </CardContent>
           </Card>
+
         </TabsContent>
       </Tabs>
 
@@ -4957,7 +5033,59 @@ const printReceipt = () => {
                 </CardContent>
               </Card>
             )}
+{sellAsLoan && (
+  <div className="p-4 bg-blue-50 rounded-lg mt-4 space-y-2">
+    <div className="flex justify-between">
+      <span className="font-semibold text-gray-700">Umumiy narx:</span>
+      <span className="font-bold text-green-900">
+        $
+        {Array.from(selectedProducts)
+          .map((id) => data.find((p) => p.id === id))
+          .filter((p): p is Product => p !== undefined)
+          .reduce((sum, product) => {
+            const price = Number.parseFloat(product.narxi.replace(/[^\d.]/g, "")) || 0
+            const quantity = bulkSellQuantities[product.id!] || 1
+            return sum + price * quantity
+          }, 0)
+          .toLocaleString()}
+      </span>
+    </div>
+    <div className="flex justify-between">
+      <span className="font-semibold text-gray-700">So'mda:</span>
+      <span className="font-bold text-green-900">
+        {(
+          Array.from(selectedProducts)
+            .map((id) => data.find((p) => p.id === id))
+            .filter((p): p is Product => p !== undefined)
+            .reduce((sum, product) => {
+              const price = Number.parseFloat(product.narxi.replace(/[^\d.]/g, "")) || 0
+              const quantity = bulkSellQuantities[product.id!] || 1
+              return sum + price * quantity
+            }, 0) * exchangeRate
+        ).toLocaleString()} so'm
+      </span>
+    </div>
+    {/* Foizli narx va so‘mda */}
 
+    <div className="flex justify-between">
+      <span className="font-semibold text-blue-700">So'mda:</span>
+      <span className="font-bold text-blue-900">
+        {(
+          Array.from(selectedProducts)
+            .map((id) => data.find((p) => p.id === id))
+            .filter((p): p is Product => p !== undefined)
+            .reduce((sum, product) => {
+              const price = Number.parseFloat(product.narxi.replace(/[^\d.]/g, "")) || 0
+              const percent = Number(product.profitPercent) || 0
+              const quantity = bulkSellQuantities[product.id!] || 1
+              const profitPrice = percent > 0 ? price + (price * percent) / 100 : price
+              return sum + profitPrice * quantity
+            }, 0) * exchangeRate
+        ).toLocaleString()} so'm
+      </span>
+    </div>
+  </div>
+)}
             {/* Products list */}
             <div className="space-y-2">
               {Array.from(selectedProducts)
@@ -5000,22 +5128,6 @@ const printReceipt = () => {
                 ))}
             </div>
 
-            {/* Total */}
-            <div className="flex justify-between items-center p-4 bg-primary/10 rounded-lg">
-              <span className="font-semibold text-lg">{t("totalAmount")}:</span>
-              <span className="font-bold text-2xl">
-                $
-                {Array.from(selectedProducts)
-                  .map((id) => data.find((p) => p.id === id))
-                  .filter((p): p is Product => p !== undefined)
-                  .reduce((sum, product) => {
-                    const price = Number.parseFloat(product.narxi.replace(/[^\d.]/g, "")) || 0
-                    const quantity = bulkSellQuantities[product.id!] || 1
-                    return sum + price * quantity
-                  }, 0)
-                  .toLocaleString()}
-              </span>
-            </div>
           </div>
 
           <DialogFooter>
@@ -5030,83 +5142,184 @@ const printReceipt = () => {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isLoanPaymentModalOpen} onOpenChange={setIsLoanPaymentModalOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("loan.addPayment")}</DialogTitle>
-            <DialogDescription>{selectedLoan?.customerName} uchun to'lov qo'shish</DialogDescription>
-          </DialogHeader>
+    <Dialog open={isLoanPaymentModalOpen} onOpenChange={setIsLoanPaymentModalOpen}>
+  <DialogContent>
+    <DialogHeader>
+      <DialogTitle>{t("loan.addPayment")}</DialogTitle>
+      <DialogDescription>{selectedLoan?.customerName} uchun to'lov qo'shish</DialogDescription>
+    </DialogHeader>
+{/* Foizli narx va foyda statistikasi */}
+{selectedLoan?.items && selectedLoan.items.length > 0 && (() => {
+  const totalProfitUSD = selectedLoan.items.reduce((sum, item) => {
+    const percent = Number(item.profitPercent) || 0
+    const price = Number(item.price)
+    const profitPrice = percent > 0 ? price + (price * percent) / 100 : price
+    return sum + profitPrice * item.quantity
+  }, 0)
+  const totalProfitUZS = totalProfitUSD * exchangeRate
+  const avgPercent = (() => {
+    const percents = selectedLoan.items
+      .filter((i: any) => Number(i.profitPercent) > 0)
+      .map((i: any) => Number(i.profitPercent))
+    return percents.length > 0
+      ? Math.round(percents.reduce((a, b) => a + b, 0) / percents.length)
+      : 0
+  })()
+  const profitOnly = selectedLoan.items.reduce((sum, item) => {
+    const p = Number(item.profitPercent) || 0
+    const base = Number(item.price)
+    return sum + (p > 0 ? (base * p / 100) * item.quantity : 0)
+  }, 0)
+  const profitOnlyUZS = profitOnly * exchangeRate
+  return (
+    <div className="mt-4 p-3 bg-blue-50 rounded-lg space-y-2">
+      <div className="flex justify-between">
+        <span className="font-semibold text-blue-700">Foizli narx:</span>
+        <span className="font-bold text-blue-900">
+          ${totalProfitUSD.toLocaleString()}
+          {avgPercent > 0 && (
+            <span className="text-xs text-blue-700 ml-1">({avgPercent}%)</span>
+          )}
+        </span>
+      </div>
+      <div className="flex justify-between">
+        <span className="font-semibold text-blue-700">So'mda:</span>
+        <span className="font-bold text-blue-900">
+          {totalProfitUZS.toLocaleString()} so'm
+        </span>
+      </div>
+      <div className="flex justify-between mt-2">
+        <span className="font-semibold text-green-700">Foyda (faqat foizdan):</span>
+        <span className="font-bold text-green-700">
+          ${profitOnly.toLocaleString()}
+        </span>
+      </div>
+      <div className="flex justify-between">
+        <span className="font-semibold text-green-700">So'mda:</span>
+        <span className="font-bold text-green-700">
+          {profitOnlyUZS.toLocaleString()} so'm
+        </span>
+      </div>
+    </div>
+  )
+})()}
+    {selectedLoan && (
+      <div className="mb-4 p-4 bg-blue-50 rounded-lg space-y-2">
+        <div className="flex justify-between">
+          <span className="text-xs text-muted-foreground">Umumiy summa:</span>
+          <span className="font-semibold text-blue-900">
+            ${selectedLoan.totalAmount.toLocaleString()}
+          </span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-xs text-muted-foreground">So'mda:</span>
+          <span className="font-semibold text-blue-900">
+            {(selectedLoan.totalAmount * exchangeRate).toLocaleString()} so'm
+          </span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-xs text-green-700">To'langan summa:</span>
+          <span className="font-semibold text-green-700">
+            ${(selectedLoan.amountPaid || 0).toLocaleString()}
+          </span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-xs text-green-700">So'mda:</span>
+          <span className="font-semibold text-green-700">
+            {((selectedLoan.amountPaid || 0) * exchangeRate).toLocaleString()} so'm
+          </span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-xs text-orange-700">Qolgan qarz:</span>
+          <span className="font-semibold text-orange-700">
+            ${(selectedLoan.amountRemaining || 0).toLocaleString()}
+          </span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-xs text-orange-700">So'mda:</span>
+          <span className="font-semibold text-orange-700">
+            {((selectedLoan.amountRemaining || 0) * exchangeRate).toLocaleString()} so'm
+          </span>
+        </div>
+      </div>
+    )}
 
-          <div className="space-y-4">
-            <div className="p-4 bg-muted rounded-lg space-y-2">
-              <div className="flex justify-between">
-                <span className="text-sm text-muted-foreground">{t("loan.totalAmount")}:</span>
-                <span className="font-semibold">${selectedLoan?.totalAmount.toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-muted-foreground">{t("loan.amountPaid")}:</span>
-                <span className="font-semibold text-green-600">
-                  ${(selectedLoan?.amountPaid || 0).toLocaleString()}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-muted-foreground">{t("loan.amountRemaining")}:</span>
-                <span className="font-semibold text-orange-600">
-                  ${(selectedLoan?.amountRemaining || 0).toLocaleString()}
-                </span>
-              </div>
-            </div>
+    <div className="space-y-4">
+      <div>
+        <Label htmlFor="paymentAmount">{t("loan.paymentAmount")} *</Label>
+          {/* Calculate totalProfitUSD for this scope */}
+          {selectedLoan?.items && (
+            (() => {
+              const totalProfitUSD = selectedLoan.items.reduce((sum, item) => {
+                const percent = Number(item.profitPercent) || 0
+                const price = Number(item.price)
+                const profitPrice = percent > 0 ? price + (price * percent) / 100 : price
+                return sum + profitPrice * item.quantity
+              }, 0)
+              return (
+                <Input
+                  id="paymentAmount"
+                  type="number"
+                  min="0"
+                  max={selectedLoan?.amountRemaining || 0}
+                  value={loanPaymentData.amount}
+                  onChange={(e) => setLoanPaymentData({ ...loanPaymentData, amount: e.target.value })}
+                  placeholder="0.00"
+                  className={
+                    Number(loanPaymentData.amount) > totalProfitUSD
+                      ? "border-red-500 focus:border-red-600 bg-red-50"
+                      : "border-gray-300 focus:border-[#0099b5]"
+                  }
+                />
+              )
+            })()
+          )}
+          {/* If selectedLoan?.items is not present, fallback to default input */}
+          {!selectedLoan?.items && (
+            <Input
+              id="paymentAmount"
+              type="number"
+              min="0"
+              max={selectedLoan?.amountRemaining || 0}
+              value={loanPaymentData.amount}
+              onChange={(e) => setLoanPaymentData({ ...loanPaymentData, amount: e.target.value })}
+              placeholder="0.00"
+              className="border-gray-300 focus:border-[#0099b5]"
+            />
+          )}
+      </div>
+      <div>
+        <Label htmlFor="paymentNote">{t("loan.paymentNote")}</Label>
+        <Textarea
+          id="paymentNote"
+          value={loanPaymentData.note}
+          onChange={(e) => setLoanPaymentData({ ...loanPaymentData, note: e.target.value })}
+          placeholder="Qo'shimcha izoh"
+          rows={3}
+        />
+      </div>
+    </div>
 
-            <div>
-              <Label htmlFor="paymentAmount">{t("loan.paymentAmount")} *</Label>
-              <Input
-                id="paymentAmount"
-                type="number"
-                min="0"
-                max={selectedLoan?.amountRemaining || 0}
-                value={loanPaymentData.amount}
-                onChange={(e) => setLoanPaymentData({ ...loanPaymentData, amount: e.target.value })}
-                placeholder="0.00"
-                className={
-                  Number(loanPaymentData.amount) > (selectedLoan?.amountRemaining || 0)
-                    ? "border-red-500 focus:border-red-600 bg-red-50"
-                    : "border-gray-300 focus:border-[#0099b5]"
-                }
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="paymentNote">{t("loan.paymentNote")}</Label>
-              <Textarea
-                id="paymentNote"
-                value={loanPaymentData.note}
-                onChange={(e) => setLoanPaymentData({ ...loanPaymentData, note: e.target.value })}
-                placeholder="Qo'shimcha izoh"
-                rows={3}
-              />
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsLoanPaymentModalOpen(false)}>
-              {t("cancel")}
-            </Button>
-            <Button onClick={handleAddLoanPayment} disabled={isSubmitting}>
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Yuklanmoqda...
-                </>
-              ) : (
-                <>
-                  <CreditCard className="mr-2 h-4 w-4" />
-                  To'lov qo'shish
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+    <DialogFooter>
+      <Button variant="outline" onClick={() => setIsLoanPaymentModalOpen(false)}>
+        {t("cancel")}
+      </Button>
+      <Button onClick={handleAddLoanPayment} disabled={isSubmitting}>
+        {isSubmitting ? (
+          <>
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            Yuklanmoqda...
+          </>
+        ) : (
+          <>
+            <CreditCard className="mr-2 h-4 w-4" />
+            To'lov qo'shish
+          </>
+        )}
+      </Button>
+    </DialogFooter>
+  </DialogContent>
+</Dialog>
 
       <Dialog open={isLoanDetailsModalOpen} onOpenChange={setIsLoanDetailsModalOpen}>
         <DialogContent className="max-w-2xl">
@@ -5115,102 +5328,172 @@ const printReceipt = () => {
             <DialogDescription>{selectedLoan?.customerName}</DialogDescription>
           </DialogHeader>
 
-          {selectedLoan && (
-            <div className="space-y-6">
-              {/* Customer Info */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Mijoz ma'lumotlari</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Ism:</span>
-                    <span className="font-medium">{selectedLoan.customerName}</span>
-                  </div>
-                  {selectedLoan.customerPhone && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Telefon:</span>
-                      <span className="font-medium">{selectedLoan.customerPhone}</span>
-                    </div>
-                  )}
-                  {selectedLoan.customerAddress && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Manzil:</span>
-                      <span className="font-medium">{selectedLoan.customerAddress}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Chek raqami:</span>
-                    <span className="font-medium">{selectedLoan.receiptNumber}</span>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Payment Info */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">To'lov ma'lumotlari</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">{t("loan.totalAmount")}:</span>
-                    <span className="font-semibold">${selectedLoan.totalAmount.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">{t("loan.amountPaid")}:</span>
-                    <span className="font-semibold text-green-600">
-                      ${(selectedLoan.amountPaid || 0).toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">{t("loan.amountRemaining")}:</span>
-                    <span className="font-semibold text-orange-600">
-                      ${(selectedLoan.amountRemaining || 0).toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">{t("loan.status")}:</span>
-                    <Badge
-                      variant={
-                        selectedLoan.status === "paid"
-                          ? "default"
-                          : selectedLoan.status === "partial"
-                            ? "secondary"
-                            : "destructive"
-                      }
-                    >
-                      {t(`loan.status.${selectedLoan.status}`)}
-                    </Badge>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Payment History */}
-              {selectedLoan.paymentHistory && selectedLoan.paymentHistory.length > 0 && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-base">{t("loan.paymentHistory")}</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3">
-                      {selectedLoan.paymentHistory.map((payment, index) => (
-                        <div key={index} className="flex justify-between items-start p-3 bg-muted rounded-lg">
-                          <div>
-                            <p className="font-semibold">${payment.amount.toLocaleString()}</p>
-                            <p className="text-sm text-muted-foreground">
-                              {payment.date?.toDate?.()?.toLocaleDateString("uz-UZ") || "N/A"}
-                            </p>
-                            {payment.note && <p className="text-sm text-muted-foreground mt-1">{payment.note}</p>}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-            </div>
+  {selectedLoan && (
+  <Card className="mb-4">
+    <CardHeader>
+      <CardTitle className="text-base font-bold text-blue-900">Qarz tafsilotlari</CardTitle>
+    </CardHeader>
+    <CardContent className="space-y-4">
+      {/* Mijoz ma'lumotlari */}
+      <div className="flex items-center gap-4">
+        <Users className="h-5 w-5 text-muted-foreground" />
+        <div>
+          <div className="font-semibold text-lg">{selectedLoan.customerName}</div>
+          {selectedLoan.customerPhone && (
+            <div className="text-sm text-muted-foreground">{selectedLoan.customerPhone}</div>
           )}
+        </div>
+      </div>
 
+      {/* Mahsulotlar */}
+      {selectedLoan.items && selectedLoan.items.length > 0 && (
+        <div className="mt-2 p-3 bg-gray-50 rounded-lg">
+          <div className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
+            <Package className="h-3 w-3" />
+            Mahsulotlar:
+          </div>
+          <div className="space-y-1.5">
+            {selectedLoan.items.map((item, idx) => {
+              const profitPercent = Number(item.profitPercent) || 0
+              const basePrice = Number(item.price)
+              const profitPrice = profitPercent > 0 ? basePrice + (basePrice * profitPercent) / 100 : basePrice
+              const totalProfitPrice = profitPrice * item.quantity
+              const profitOnly = profitPercent > 0 ? (basePrice * profitPercent / 100) * item.quantity : 0
+              return (
+                <div key={idx} className="flex items-center justify-between gap-2 text-sm">
+                  <div>
+                    <span className="font-medium text-gray-900">{item.productName}</span>
+                    <span className="text-xs text-gray-600 ml-2">
+                      Kod: {item.productCode} • {item.company}
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-xs text-gray-600">
+                      {item.quantity} x ${basePrice.toLocaleString()}
+                    </span>
+                    <span className="font-semibold text-sm ml-2">
+                      ${Number(item.quantity * basePrice).toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Statistika */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
+        <div>
+          <p className="text-xs text-muted-foreground">Umumiy summa</p>
+          <p className="font-semibold">${selectedLoan.totalAmount.toLocaleString()}</p>
+          <p className="text-xs text-muted-foreground">
+            {(selectedLoan.totalAmount * exchangeRate).toLocaleString()} so'm
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">To'langan summa</p>
+          <p className="font-semibold text-green-600">${(selectedLoan.amountPaid || 0).toLocaleString()}</p>
+          <p className="text-xs text-green-700">
+            {((selectedLoan.amountPaid || 0) * exchangeRate).toLocaleString()} so'm
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Qolgan qarz</p>
+          <p className="font-semibold text-orange-600">${(selectedLoan.amountRemaining || 0).toLocaleString()}</p>
+          <p className="text-xs text-orange-700">
+            {((selectedLoan.amountRemaining || 0) * exchangeRate).toLocaleString()} so'm
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Holati</p>
+          <Badge
+            variant={
+              selectedLoan.status === "paid"
+                ? "default"
+                : selectedLoan.status === "partial"
+                ? "secondary"
+                : "destructive"
+            }
+          >
+            {selectedLoan.status === "paid"
+              ? "To'langan"
+              : selectedLoan.status === "partial"
+              ? "Qisman to'langan"
+              : "To'lanmagan"}
+          </Badge>
+        </div>
+      </div>
+
+      {/* Umumiy foizli narx va foyda */}
+      {selectedLoan.items && selectedLoan.items.length > 0 && (
+        <div className="mt-4 p-3 bg-blue-50 rounded-lg space-y-2">
+          {(() => {
+            const totalProfitUSD = selectedLoan.items.reduce((sum, item) => {
+              const percent = Number(item.profitPercent) || 0
+              const price = Number(item.price)
+              const profitPrice = percent > 0 ? price + (price * percent) / 100 : price
+              return sum + profitPrice * item.quantity
+            }, 0)
+            const totalProfitUZS = totalProfitUSD * exchangeRate
+            const avgPercent = (() => {
+              const percents = selectedLoan.items
+                .filter((i: any) => Number(i.profitPercent) > 0)
+                .map((i: any) => Number(i.profitPercent))
+              return percents.length > 0
+                ? Math.round(percents.reduce((a, b) => a + b, 0) / percents.length)
+                : 0
+            })()
+            const profitOnly = selectedLoan.items.reduce((sum, item) => {
+              const p = Number(item.profitPercent) || 0
+              const base = Number(item.price)
+              return sum + (p > 0 ? (base * p / 100) * item.quantity : 0)
+            }, 0)
+            const profitOnlyUZS = profitOnly * exchangeRate
+            return (
+              <>
+                <div className="flex justify-between">
+                  <span className="font-semibold text-blue-700">Foizli narx:</span>
+                  <span className="font-bold text-blue-900">
+                    ${totalProfitUSD.toLocaleString()}
+                    {avgPercent > 0 && (
+                      <span className="text-xs text-blue-700 ml-1">({avgPercent}%)</span>
+                    )}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="font-semibold text-blue-700">So'mda:</span>
+                  <span className="font-bold text-blue-900">
+                    {totalProfitUZS.toLocaleString()} so'm
+                  </span>
+                </div>
+                <div className="flex justify-between mt-2">
+                  <span className="font-semibold text-green-700">Foyda (faqat foizdan):</span>
+                  <span className="font-bold text-green-700">
+                    ${profitOnly.toLocaleString()}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="font-semibold text-green-700">So'mda:</span>
+                  <span className="font-bold text-green-700">
+                    {profitOnlyUZS.toLocaleString()} so'm
+                  </span>
+                </div>
+              </>
+            )
+          })()}
+        </div>
+      )}
+
+      {/* Eslatma */}
+      {selectedLoan.notes && (
+        <p className="text-sm text-muted-foreground mt-2">
+          <span className="font-medium">Eslatma:</span> {selectedLoan.notes}
+        </p>
+      )}
+    </CardContent>
+  </Card>
+)}
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsLoanDetailsModalOpen(false)}>
               Yopish

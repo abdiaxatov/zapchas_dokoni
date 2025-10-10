@@ -58,6 +58,7 @@ export interface SaleTransaction {
   loanStatus?: "pending" | "partial" | "paid" // Loan payment status
   amountPaid?: number // Amount paid so far
   amountRemaining?: number // Amount still owed
+  profitPercent?: number
 }
 
 export interface LoanRecord {
@@ -70,6 +71,7 @@ export interface LoanRecord {
   totalAmount: number
   amountPaid: number
   amountRemaining: number
+  profitPercent?: number
   source?: string // Qayerdan olib kelindi
   loanDate: Timestamp
   dueDate?: Timestamp
@@ -659,6 +661,7 @@ export const addLoanPayment = async (loanId: string, amount: number, note?: stri
       amountPaid: newAmountPaid,
       amountRemaining: Math.max(0, newAmountRemaining),
       status: newStatus,
+      profitPercent: loan.profitPercent || 0,
       paymentHistory: updatedPaymentHistory,
     })
 
@@ -669,6 +672,7 @@ export const addLoanPayment = async (loanId: string, amount: number, note?: stri
         loanStatus: newStatus,
         amountPaid: newAmountPaid,
         amountRemaining: Math.max(0, newAmountRemaining),
+        profitPercent: loan.profitPercent || 0,
       })
     }
   } catch (error) {
