@@ -104,7 +104,7 @@ import { DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Timestamp } from "firebase/firestore"
 
-export default function DataPage() {
+export default function GMPage() {
   const { user, loading } = useAuth()
   const { t } = useLanguage()
   const { showToast } = useToast()
@@ -571,8 +571,6 @@ export default function DataPage() {
     setIsPrinting(true)
     setTimeout(() => {
       console.log("[v0] isPrinting set to true, calling window.print()")
-      const printElement = document.querySelector(".receipt-print-only")
-      console.log("[v0] Print element found:", printElement)
       window.print()
       setIsPrinting(false)
     }, 100)

@@ -154,8 +154,6 @@ export default function DataPage() {
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set())
   const [isBulkSellModalOpen, setIsBulkSellModalOpen] = useState(false)
   const [bulkSellQuantities, setBulkSellQuantities] = useState<Record<string, number>>({})
-  const [showReceipt, setShowReceipt] = useState(false)
-  const [isPrinting, setIsPrinting] = useState(false)
   const [receiptData, setReceiptData] = useState<any>(null)
   const [saleTransactions, setSaleTransactions] = useState<SaleTransaction[]>([])
   const [salesHistoryFilter, setSalesHistoryFilter] = useState<"all" | "today" | "week" | "month">("all")
@@ -489,6 +487,7 @@ export default function DataPage() {
           price,
           total: price * quantity,
           location: product.location,
+          profitPercent: product.profitPercent || 0,
         })
       }
 
@@ -545,8 +544,7 @@ export default function DataPage() {
         })
       }
 
-      setReceiptData(receipt)
-      setShowReceipt(true)
+      setReceiptData(null)
       setIsBulkSellModalOpen(false)
       setSelectedProducts(new Set())
       setBulkSellQuantities({})
@@ -577,17 +575,12 @@ export default function DataPage() {
     }
   }
 
-  const printReceipt = () => {
-    console.log("[v0] Starting print, receiptData:", receiptData)
-    setIsPrinting(true)
-    setTimeout(() => {
-      console.log("[v0] isPrinting set to true, calling window.print()")
-      const printElement = document.querySelector(".receipt-print-only")
-      console.log("[v0] Print element found:", printElement)
-      window.print()
-      setIsPrinting(false)
-    }, 100)
-  }
+const printReceipt = () => {
+  setTimeout(() => {
+    window.print()
+    setReceiptData(null) // printdan keyin tozalash
+  }, 100)
+}
 
   const handleCreate = async () => {
     try {
@@ -3042,20 +3035,32 @@ export default function DataPage() {
                               </td>
                               <td className="py-3 px-4">
                                 <div className="space-y-1">
-                                  {transaction.items.slice(0, 2).map((item, idx) => (
-                                    <div key={idx} className="text-sm">
-                                      <span className="font-medium text-gray-900">{item.productName}</span>
-                                      <span className="text-gray-500 ml-2">
-                                        ({item.quantity} x ${item.price.toFixed(2)})
-                                      </span>
-                                    </div>
-                                  ))}
-                                  {transaction.items.length > 2 && (
-                                    <div className="text-sm text-gray-500">
-                                      +{transaction.items.length - 2} ta mahsulot
-                                    </div>
-                                  )}
-                                </div>
+  {transaction.items.slice(0, 2).map((item, idx) => {
+    const profitPercent = Number(item.profitPercent) || 0
+    const basePrice = Number(item.price)
+    const profitPrice = profitPercent > 0
+      ? basePrice + (basePrice * profitPercent / 100)
+      : basePrice
+    return (
+      <div key={idx} className="text-sm">
+        <span className="font-medium text-gray-900">{item.productName}</span>
+        <span className="text-gray-500 ml-2">
+          ({item.quantity} x ${basePrice.toLocaleString()})
+        </span>
+        {profitPercent > 0 && (
+          <span className="block text-xs text-blue-700 ml-6">
+            Foizli narx: ${profitPrice.toLocaleString()} ({profitPercent}%)
+          </span>
+        )}
+      </div>
+    )
+  })}
+  {transaction.items.length > 2 && (
+    <div className="text-sm text-gray-500">
+      +{transaction.items.length - 2} ta mahsulot
+    </div>
+  )}
+</div>
                               </td>
                               <td className="py-3 px-4 text-right">
                                 <span className="font-bold text-green-600 text-lg">
@@ -3063,24 +3068,10 @@ export default function DataPage() {
                                 </span>
                               </td>
                               <td className="py-3 px-4 text-center">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    setReceiptData({
-                                      receiptNumber: transaction.receiptNumber,
-                                      items: transaction.items,
-                                      totalAmount: transaction.totalAmount,
-                                      date: saleDate,
-                                    })
-                                    setShowReceipt(true)
-                                  }}
-                                  className="text-[#0099b5] hover:bg-[#0099b5]/10"
-                                >
-                                  <Printer className="h-4 w-4 mr-1" />
-                                  Chek
-                                </Button>
+                                  <Button onClick={printReceipt} className="bg-[#0099b5] hover:bg-[#0099b5]/90 flex-1">
+              <Printer className="h-4 w-4 mr-2" />
+              Chop etish
+            </Button>
                               </td>
                             </tr>
                           )
@@ -3164,142 +3155,226 @@ export default function DataPage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="loans" className="space-y-6">
-          {/* Loan Statistics */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">{t("loan.totalLoans")}</CardTitle>
-                <Wallet className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{loans.length}</div>
-                <p className="text-xs text-muted-foreground mt-1">Jami: ${totalLoanAmount.toLocaleString()}</p>
-              </CardContent>
-            </Card>
+     <TabsContent value="loans" className="space-y-6">
+  {/* Loan Statistics */}
+  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+    {/* Umumiy qarzlar soni va jami */}
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium">{t("loan.totalLoans")}</CardTitle>
+        <Wallet className="h-4 w-4 text-muted-foreground" />
+      </CardHeader>
+      <CardContent>
+        <div className="text-2xl font-bold">{loans.length}</div>
+        <p className="text-xs text-muted-foreground mt-1">
+          Jami: ${totalLoanAmount.toLocaleString()}
+        </p>
+        <p className="text-xs text-muted-foreground mt-1">
+          {(totalLoanAmount * exchangeRate).toLocaleString()} so'm
+        </p>
+      </CardContent>
+    </Card>
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">{t("loan.pendingLoans")}</CardTitle>
-                <AlertCircle className="h-4 w-4 text-orange-500" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{pendingLoans.length}</div>
-                <p className="text-xs text-muted-foreground mt-1">To'lanishi kerak</p>
-              </CardContent>
-            </Card>
+    {/* Foizli jami qarz va foyda */}
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium">Foizli jami qarz</CardTitle>
+        <DollarSign className="h-4 w-4 text-blue-500" />
+      </CardHeader>
+      <CardContent>
+        {/* Foizli jami qarz hisoblash */}
+        {(() => {
+          const total = loans.reduce((sum, loan) =>
+            sum +
+            (loan.items
+              ? loan.items.reduce((itemSum: number, item: any) => {
+                  const profitPercent = Number(item.profitPercent) || 0
+                  const base = Number(item.price)
+                  const profit = profitPercent > 0 ? base + (base * profitPercent) / 100 : base
+                  return itemSum + profit * item.quantity
+                }, 0)
+              : 0),
+          0)
+          const totalUZS = total * exchangeRate
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">{t("loan.paidLoans")}</CardTitle>
-                <CreditCard className="h-4 w-4 text-green-500" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{loans.filter((l) => l.status === "paid").length}</div>
-                <p className="text-xs text-muted-foreground mt-1">To'langan qarzlar</p>
-              </CardContent>
-            </Card>
-          </div>
+          // O'rtacha foiz (agar bitta mahsulot bo'lsa, aniq foiz ko'rsatamiz)
+          let avgPercent = 0
+          let percentCount = 0
+          loans.forEach(loan => {
+            loan.items?.forEach((item: any) => {
+              if (item.profitPercent && Number(item.profitPercent) > 0) {
+                avgPercent += Number(item.profitPercent)
+                percentCount++
+              }
+            })
+          })
+          avgPercent = percentCount > 0 ? Math.round(avgPercent / percentCount) : 0
 
-          {/* Loan Filters */}
-          <Card>
-            <CardHeader>
-              <div className="flex flex-col gap-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>{t("loan.loanList")}</CardTitle>
-                    <CardDescription>Qarzga olganlar ro'yxati va to'lovlar</CardDescription>
-                  </div>
-                </div>
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                    <Input
-                      placeholder="Mijoz ismi, telefon yoki eslatma bo'yicha qidirish..."
-                      value={loanSearchQuery}
-                      onChange={(e) => setLoanSearchQuery(e.target.value)}
-                      className="pl-9 h-10"
-                    />
-                  </div>
-                  <Select value={loanStatusFilter} onValueChange={setLoanStatusFilter}>
-                    <SelectTrigger className="w-full sm:w-[200px] h-10">
-                      <SelectValue placeholder={t("loan.filterStatus")} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">{t("loan.allLoans")}</SelectItem>
-                      <SelectItem value="pending">{t("loan.status.pending")}</SelectItem>
-                      <SelectItem value="partial">{t("loan.status.partial")}</SelectItem>
-                      <SelectItem value="paid">{t("loan.status.paid")}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+          return (
+            <>
+              <div className="text-2xl font-bold text-blue-900">
+                ${total.toLocaleString()}
+                {avgPercent > 0 && (
+                  <span className="text-xs text-blue-700 ml-1">({avgPercent}%)</span>
+                )}
               </div>
-            </CardHeader>
-            <CardContent>
-              {filteredLoans.length === 0 ? (
-                <div className="text-center py-12">
-                  <HandCoins className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                  <p className="text-muted-foreground">
-                    {loanSearchQuery ? "Qidiruv bo'yicha natija topilmadi" : t("loan.noLoans")}
-                  </p>
-                </div>
-              ) : (
-                <>
-                  {renderLoansTable()}
+              <p className="text-xs text-blue-700 mt-1">
+                {totalUZS.toLocaleString()} so'm
+              </p>
+            </>
+          )
+        })()}
+        {/* Foyda (faqat foizdan) */}
+        {(() => {
+          const profit = loans.reduce((sum, loan) =>
+            sum +
+            (loan.items
+              ? loan.items.reduce((itemSum: number, item: any) => {
+                  const p = Number(item.profitPercent) || 0
+                  const base = Number(item.price)
+                  return itemSum + (p > 0 ? (base * p / 100) * item.quantity : 0)
+                }, 0)
+              : 0),
+          0)
+          const profitUZS = profit * exchangeRate
+          return (
+            <>
+              <div className="mt-2 text-green-700 font-semibold text-xs">
+                Foyda (faqat foizdan): ${profit.toLocaleString()}
+              </div>
+              <div className="text-green-700 font-semibold text-xs">
+                {profitUZS.toLocaleString()} so'm
+              </div>
+            </>
+          )
+        })()}
+      </CardContent>
+    </Card>
 
-                  {/* Pagination */}
-                  <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-6 pt-4 border-t">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-gray-600">Sahifada:</span>
-                      <Select
-                        value={loansPerPage.toString()}
-                        onValueChange={(value) => {
-                          setLoansPerPage(Number(value))
-                          setLoansPage(1)
-                        }}
-                      >
-                        <SelectTrigger className="w-[100px] h-9">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="10">10</SelectItem>
-                          <SelectItem value="20">20</SelectItem>
-                          <SelectItem value="50">50</SelectItem>
-                          <SelectItem value="100">100</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <span className="text-sm text-gray-600">
-                        {loansStartIndex + 1}-{Math.min(loansEndIndex, filteredLoans.length)} / {filteredLoans.length}
-                      </span>
-                    </div>
+    {/* To'lanmagan (pending) qarzlar */}
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium">{t("loan.pendingLoans")}</CardTitle>
+        <AlertCircle className="h-4 w-4 text-orange-500" />
+      </CardHeader>
+      <CardContent>
+        <div className="text-2xl font-bold">{pendingLoans.length}</div>
+        <p className="text-xs text-muted-foreground mt-1">To'lanishi kerak</p>
+      </CardContent>
+    </Card>
 
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setLoansPage((p) => Math.max(1, p - 1))}
-                        disabled={loansPage === 1}
-                      >
-                        <ChevronLeft className="h-4 w-4" />
-                      </Button>
-                      <span className="text-sm text-gray-600">
-                        Sahifa {loansPage} / {loansTotalPages}
-                      </span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setLoansPage((p) => Math.min(loansTotalPages, p + 1))}
-                        disabled={loansPage === loansTotalPages}
-                      >
-                        <ChevronRight className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+    {/* To'langan qarzlar */}
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium">{t("loan.paidLoans")}</CardTitle>
+        <CreditCard className="h-4 w-4 text-green-500" />
+      </CardHeader>
+      <CardContent>
+        <div className="text-2xl font-bold">{loans.filter((l) => l.status === "paid").length}</div>
+        <p className="text-xs text-muted-foreground mt-1">To'langan qarzlar</p>
+      </CardContent>
+    </Card>
+  </div>
+
+  {/* Loan Filters */}
+  <Card>
+    <CardHeader>
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle>{t("loan.loanList")}</CardTitle>
+            <CardDescription>Qarzga olganlar ro'yxati va to'lovlar</CardDescription>
+          </div>
+        </div>
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <Input
+              placeholder="Mijoz ismi, telefon yoki eslatma bo'yicha qidirish..."
+              value={loanSearchQuery}
+              onChange={(e) => setLoanSearchQuery(e.target.value)}
+              className="pl-9 h-10"
+            />
+          </div>
+          <Select value={loanStatusFilter} onValueChange={setLoanStatusFilter}>
+            <SelectTrigger className="w-full sm:w-[200px] h-10">
+              <SelectValue placeholder={t("loan.filterStatus")} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t("loan.allLoans")}</SelectItem>
+              <SelectItem value="pending">{t("loan.status.pending")}</SelectItem>
+              <SelectItem value="partial">{t("loan.status.partial")}</SelectItem>
+              <SelectItem value="paid">{t("loan.status.paid")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+    </CardHeader>
+    <CardContent>
+      {filteredLoans.length === 0 ? (
+        <div className="text-center py-12">
+          <HandCoins className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+          <p className="text-muted-foreground">
+            {loanSearchQuery ? "Qidiruv bo'yicha natija topilmadi" : t("loan.noLoans")}
+          </p>
+        </div>
+      ) : (
+        <>
+          {renderLoansTable()}
+
+          {/* Pagination */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-6 pt-4 border-t">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-600">Sahifada:</span>
+              <Select
+                value={loansPerPage.toString()}
+                onValueChange={(value) => {
+                  setLoansPerPage(Number(value))
+                  setLoansPage(1)
+                }}
+              >
+                <SelectTrigger className="w-[100px] h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="10">10</SelectItem>
+                  <SelectItem value="20">20</SelectItem>
+                  <SelectItem value="50">50</SelectItem>
+                  <SelectItem value="100">100</SelectItem>
+                </SelectContent>
+              </Select>
+              <span className="text-sm text-gray-600">
+                {loansStartIndex + 1}-{Math.min(loansEndIndex, filteredLoans.length)} / {filteredLoans.length}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setLoansPage((p) => Math.max(1, p - 1))}
+                disabled={loansPage === 1}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="text-sm text-gray-600">
+                Sahifa {loansPage} / {loansTotalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setLoansPage((p) => Math.min(loansTotalPages, p + 1))}
+                disabled={loansPage === loansTotalPages}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </>
+      )}
+    </CardContent>
+  </Card>
+</TabsContent>
 
         <TabsContent value="history" className="space-y-4 lg:space-y-6">
           <Card className="border-0 shadow-lg">
@@ -3360,51 +3435,122 @@ export default function DataPage() {
             </CardHeader>
             <CardContent>
               {/* Sales Statistics Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                <Card className="bg-gradient-to-br from-blue-50 to-blue-100">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-blue-700 font-medium">Jami sotuvlar</p>
-                        <p className="text-2xl font-bold text-blue-900">{filteredSales.length}</p>
-                      </div>
-                      <div className="p-3 bg-blue-500 rounded-full">
-                        <Receipt className="h-6 w-6 text-white" />
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+ <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+   {/* 🔹 Jami Sotuvlar */}
+   <Card className="bg-gradient-to-br from-blue-50 to-blue-100 hover:shadow-lg transition-shadow duration-200">
+     <CardContent className="p-5">
+       <div className="flex items-center justify-between">
+         <div>
+           <p className="text-base text-blue-700 font-semibold mb-1">Jami sotuvlar</p>
+           <p className="text-4xl font-extrabold text-blue-900">{filteredSales.length}</p>
+         </div>
+         <div className="p-4 bg-blue-600 rounded-2xl shadow-md">
+           <Receipt className="h-8 w-8 text-white" />
+         </div>
+       </div>
+     </CardContent>
+   </Card>
 
-                <Card className="bg-gradient-to-br from-green-50 to-green-100">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-green-700 font-medium">Jami summa</p>
-                        <p className="text-2xl font-bold text-green-900">
-                          ${filteredSales.reduce((acc, sale) => acc + sale.totalAmount, 0).toLocaleString()}
-                        </p>
-                      </div>
-                      <div className="p-3 bg-green-500 rounded-full">
-                        <DollarSign className="h-6 w-6 text-white" />
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+   {/* 🔹 Jami Summa */}
+   <Card className="bg-gradient-to-br from-green-50 to-green-100 hover:shadow-lg transition-shadow duration-200">
+     <CardContent className="p-6">
+       <div className="flex flex-col justify-between h-full">
+         <div className="flex items-center justify-between">
+           <div>
+             <p className="text-lg text-green-700 font-semibold mb-1">Jami summa</p>
+             <p className="text-3xl font-extrabold text-green-900">
+               ${filteredSales.reduce((acc, sale) => acc + sale.totalAmount, 0).toLocaleString()}
+             </p>
+             <p className="text-xl font-bold text-green-700 mb-2">
+               {(filteredSales.reduce((acc, sale) => acc + sale.totalAmount, 0) * exchangeRate).toLocaleString()} so'm
+             </p>
+           </div>
+           <div className="p-4 bg-green-600 rounded-2xl shadow-md">
+             <DollarSign className="h-8 w-8 text-white" />
+           </div>
+         </div>
 
-                <Card className="bg-gradient-to-br from-purple-50 to-purple-100">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-purple-700 font-medium">Sotilgan mahsulotlar</p>
-                        <p className="text-2xl font-bold text-purple-900">{totalItemsSold}</p>
-                      </div>
-                      <div className="p-3 bg-purple-500 rounded-full">
-                        <Package className="h-6 w-6 text-white" />
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
+         {/* 🔸 Foyda va foizli narxlar */}
+         {filteredSales.some(sale => sale.items.some(item => Number(item.profitPercent) > 0)) && (
+           <div className="mt-4 border-t border-green-300 pt-3 space-y-1">
+             <p className="text-base text-blue-800 font-semibold">
+               Foizli jami narx: $
+               {filteredSales
+                 .reduce((sum, sale) =>
+                   sum +
+                   sale.items.reduce((itemSum, item) => {
+                     const profitPercent = Number(item.profitPercent) || 0
+                     const base = Number(item.price)
+                     const profit = profitPercent > 0 ? base + (base * profitPercent) / 100 : base
+                     return itemSum + profit * item.quantity
+                   }, 0),
+                 0)
+                 .toLocaleString()}
+             </p>
+
+             <p className="text-base text-blue-800 font-semibold">
+               {(filteredSales
+                 .reduce((sum, sale) =>
+                   sum +
+                   sale.items.reduce((itemSum, item) => {
+                     const profitPercent = Number(item.profitPercent) || 0
+                     const base = Number(item.price)
+                     const profit = profitPercent > 0 ? base + (base * profitPercent) / 100 : base
+                     return itemSum + profit * item.quantity
+                   }, 0),
+                 0) * exchangeRate
+               ).toLocaleString()} so'm
+             </p>
+
+             <p className="text-base text-green-800 font-semibold">
+               Foyda (faqat foizdan): $
+               {filteredSales
+                 .reduce((sum, sale) =>
+                   sum +
+                   sale.items.reduce((itemSum, item) => {
+                     const p = Number(item.profitPercent) || 0
+                     const base = Number(item.price)
+                     return itemSum + (p > 0 ? (base * p / 100) * item.quantity : 0)
+                   }, 0),
+                 0)
+                 .toLocaleString()}
+             </p>
+
+             <p className="text-base text-green-800 font-semibold">
+               {(
+                 filteredSales
+                   .reduce((sum, sale) =>
+                     sum +
+                     sale.items.reduce((itemSum, item) => {
+                       const p = Number(item.profitPercent) || 0
+                       const base = Number(item.price)
+                       return itemSum + (p > 0 ? (base * p / 100) * item.quantity : 0)
+                     }, 0),
+                   0) * exchangeRate
+               ).toLocaleString()} so'm
+             </p>
+           </div>
+         )}
+       </div>
+     </CardContent>
+   </Card>
+
+   {/* 🔹 Sotilgan mahsulotlar */}
+   <Card className="bg-gradient-to-br from-purple-50 to-purple-100 hover:shadow-lg transition-shadow duration-200">
+     <CardContent className="p-5">
+       <div className="flex items-center justify-between">
+         <div>
+           <p className="text-base text-purple-700 font-semibold mb-1">Sotilgan mahsulotlar</p>
+           <p className="text-4xl font-extrabold text-purple-900">{totalItemsSold}</p>
+         </div>
+         <div className="p-4 bg-purple-600 rounded-2xl shadow-md">
+           <Package className="h-8 w-8 text-white" />
+         </div>
+       </div>
+     </CardContent>
+   </Card>
+ </div>
+
 
               {/* Sales History Table */}
               <div className="border rounded-lg overflow-hidden">
@@ -3461,47 +3607,75 @@ export default function DataPage() {
                                   </div>
                                 </div>
                               </td>
-                              <td className="py-3 px-4">
-                                <div className="space-y-1">
-                                  {transaction.items.slice(0, 2).map((item, idx) => (
-                                    <div key={idx} className="text-sm">
-                                      <span className="font-medium text-gray-900">{item.productName}</span>
-                                      <span className="text-gray-500 ml-2">
-                                        ({item.quantity} x ${item.price.toFixed(2)})
-                                      </span>
-                                    </div>
-                                  ))}
-                                  {transaction.items.length > 2 && (
-                                    <div className="text-sm text-gray-500">
-                                      +{transaction.items.length - 2} ta mahsulot
-                                    </div>
-                                  )}
-                                </div>
-                              </td>
-                              <td className="py-3 px-4 text-right">
-                                <span className="font-bold text-green-600 text-lg">
-                                  ${transaction.totalAmount.toLocaleString()}
-                                </span>
-                              </td>
+                          <td className="py-3 px-4">
+<div className="space-y-1">
+  {transaction.items.slice(0, 2).map((item, idx) => {
+    const profitPercent = Number(item.profitPercent) || 0
+    const basePrice = Number(item.price)
+    const profitPrice = profitPercent > 0
+      ? basePrice + (basePrice * profitPercent / 100)
+      : basePrice
+    return (
+      <div key={idx} className="text-sm">
+        <span className="font-medium text-gray-900">{item.productName}</span>
+        <span className="text-gray-500 ml-2">
+          ({item.quantity} x ${basePrice.toLocaleString()})
+        </span>
+        {profitPercent > 0 && (
+          <span className="block text-xs text-blue-700 ml-6">
+            Foizli narx: ${profitPrice.toLocaleString()} ({profitPercent}%)
+          </span>
+        )}
+      </div>
+    )
+  })}
+  {transaction.items.length > 2 && (
+    <div className="text-sm text-gray-500">
+      +{transaction.items.length - 2} ta mahsulot
+    </div>
+  )}
+</div>
+</td>
+<td className="py-3 px-4 text-right">
+  <span className="font-bold text-green-600 text-lg">
+    ${transaction.totalAmount.toLocaleString()}
+  </span>
+  {/* Jami foizli narx (agar kamida 1ta mahsulotda profitPercent > 0 bo‘lsa) */}
+  {transaction.items.some((item: any) => Number(item.profitPercent) > 0) && (
+    <span className="block text-xs text-blue-700 mt-1">
+      Foizli jami narx: $
+      {transaction.items
+        .reduce((sum: number, item: any) => {
+          const profitPercent = Number(item.profitPercent) || 0
+          const basePrice = Number(item.price)
+          const profitPrice = profitPercent > 0
+            ? basePrice + (basePrice * profitPercent / 100)
+            : basePrice
+          return sum + profitPrice * item.quantity
+        }, 0)
+        .toLocaleString(undefined, { maximumFractionDigits: 0 })}
+    </span>
+  )}
+</td>
                               <td className="py-3 px-4 text-center">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    setReceiptData({
-                                      receiptNumber: transaction.receiptNumber,
-                                      items: transaction.items,
-                                      totalAmount: transaction.totalAmount,
-                                      date: saleDate,
-                                    })
-                                    setShowReceipt(true)
-                                  }}
-                                  className="text-[#0099b5] hover:bg-[#0099b5]/10"
-                                >
-                                  <Printer className="h-4 w-4 mr-1" />
-                                  Chek
-                                </Button>
+<Button
+  variant="outline"
+  size="sm"
+  onClick={e => {
+    e.stopPropagation()
+    setReceiptData({
+      receiptNumber: transaction.receiptNumber,
+      items: transaction.items,
+      totalAmount: transaction.totalAmount,
+      date: saleDate,
+    })
+    setTimeout(() => window.print(), 100)
+  }}
+  className="text-[#0099b5] hover:bg-[#0099b5]/10"
+>
+  <Printer className="h-4 w-4 mr-1" />
+  Chek
+</Button>
                               </td>
                             </tr>
                           )
@@ -5045,158 +5219,104 @@ export default function DataPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showReceipt} onOpenChange={setShowReceipt}>
-        <DialogContent className="max-w-[400px] p-0">
-          <DialogHeader className="sr-only">
-            <DialogTitle>Chek</DialogTitle>
-          </DialogHeader>
-          {receiptData && (
-            <div
-              className="receipt-container bg-white p-6 text-black"
-              style={{ fontFamily: "monospace", fontSize: "14px" }}
-            >
-              <div className="text-center mb-4">
-                <h2 className="text-2xl font-bold mb-2">SAVDO CHEKI</h2>
-                <div className="text-xs space-y-1">
-                  <p className="font-semibold">Chek №: {receiptData.receiptNumber}</p>
-                  <p>
-                    {receiptData.date instanceof Date
-                      ? receiptData.date.toLocaleString("uz-UZ", {
-                          day: "2-digit",
-                          month: "2-digit",
-                          year: "numeric",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })
-                      : receiptData.date}
-                  </p>
+
+{receiptData && (
+  <div className="receipt-print-only" style={{ display: "none" }}>
+    <div className="text-center mb-4">
+      <h2 className="text-2xl font-bold mb-2">SAVDO CHEKI</h2>
+      <div className="text-xs space-y-1">
+        <p className="font-semibold">Chek №: {receiptData.receiptNumber}</p>
+        <p>
+          {receiptData.date instanceof Date
+            ? receiptData.date.toLocaleString("uz-UZ", {
+                day: "2-digit",
+                month: "2-digit",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })
+            : receiptData.date}
+        </p>
+      </div>
+    </div>
+    <div className="border-t-2 border-dashed border-gray-800 my-3"></div>
+    <div className="space-y-4 text-sm">
+      {receiptData.items.map((item: any, index: number) => {
+        const profitPercent = Number(item.profitPercent) || 0
+        const basePrice = Number(item.price)
+        const profitPrice = profitPercent > 0
+          ? basePrice + (basePrice * profitPercent / 100)
+          : basePrice
+        const totalProfitPrice = profitPrice * item.quantity
+        return (
+          <div key={index} className="space-y-1">
+            <div className="font-bold text-base">{item.productName}</div>
+            <div className="text-xs space-y-0.5 text-gray-700">
+              <div className="flex justify-between">
+                <span>Kod:</span>
+                <span className="font-semibold">{item.productCode}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Model:</span>
+                <span className="font-semibold">{item.model || "N/A"}</span>
+              </div>
+              {item.location && (
+                <div className="flex justify-between">
+                  <span>Joylashuv:</span>
+                  <span className="font-semibold">{item.location}</span>
                 </div>
-              </div>
-
-              <div className="border-t-2 border-dashed border-gray-800 my-3"></div>
-
-              {/* Products List */}
-              <div className="space-y-4 text-sm">
-                {receiptData.items.map((item: any, index: number) => (
-                  <div key={index} className="space-y-1">
-                    <div className="font-bold text-base">{item.productName}</div>
-                    <div className="text-xs space-y-0.5 text-gray-700">
-                      <div className="flex justify-between">
-                        <span>Kod:</span>
-                        <span className="font-semibold">{item.productCode}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Model:</span>
-                        <span className="font-semibold">{item.model || "N/A"}</span>
-                      </div>
-                      {item.location && (
-                        <div className="flex justify-between">
-                          <span>Joylashuv:</span>
-                          <span className="font-semibold">{item.location}</span>
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex justify-between mt-2 text-sm">
-                      <span>
-                        {item.quantity} dona x ${item.price.toFixed(2)}
-                      </span>
-                      <span className="font-bold">${(item.quantity * item.price).toFixed(2)}</span>
-                    </div>
-                    {index < receiptData.items.length - 1 && (
-                      <div className="border-t border-dotted border-gray-400 mt-3"></div>
-                    )}
-                  </div>
-                ))}
-              </div>
-
-              <div className="border-t-2 border-dashed border-gray-800 my-4"></div>
-
-              {/* Total */}
-              <div className="flex justify-between text-xl font-bold mb-4">
-                <span>JAMI:</span>
-                <span>${receiptData.totalAmount.toLocaleString()}</span>
-              </div>
-
-              <div className="border-t-2 border-dashed border-gray-800 my-3"></div>
+              )}
             </div>
-          )}
-          <DialogFooter className="p-4 pt-0">
-            <Button variant="outline" onClick={() => setShowReceipt(false)} className="flex-1">
-              Yopish
-            </Button>
-            <Button onClick={printReceipt} className="bg-[#0099b5] hover:bg-[#0099b5]/90 flex-1">
-              <Printer className="h-4 w-4 mr-2" />
-              Chop etish
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {receiptData && (
-        <div className="receipt-print-only">
-          <div className="text-center mb-4">
-            <h2 className="text-2xl font-bold mb-2">SAVDO CHEKI</h2>
-            <div className="text-xs space-y-1">
-              <p className="font-semibold">Chek №: {receiptData.receiptNumber}</p>
-              <p>
-                {receiptData.date instanceof Date
-                  ? receiptData.date.toLocaleString("uz-UZ", {
-                      day: "2-digit",
-                      month: "2-digit",
-                      year: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })
-                  : receiptData.date}
-              </p>
+            <div className="flex justify-between mt-2 text-sm">
+              <span>
+                {item.quantity} dona x ${profitPrice.toLocaleString()}
+              </span>
+              <span className="font-bold">${totalProfitPrice.toLocaleString()}</span>
             </div>
+            <div className="flex justify-between mt-1 text-sm">
+              <span></span>
+              <span className="font-bold">{(totalProfitPrice * exchangeRate).toLocaleString()} so'm</span>
+            </div>
+            {index < receiptData.items.length - 1 && (
+              <div className="border-t border-dotted border-gray-400 mt-3"></div>
+            )}
           </div>
-
-          <div className="border-t-2 border-dashed border-gray-800 my-3"></div>
-
-          <div className="space-y-4 text-sm">
-            {receiptData.items.map((item: any, index: number) => (
-              <div key={index} className="space-y-1">
-                <div className="font-bold text-base">{item.productName}</div>
-                <div className="text-xs space-y-0.5 text-gray-700">
-                  <div className="flex justify-between">
-                    <span>Kod:</span>
-                    <span className="font-semibold">{item.productCode}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Model:</span>
-                    <span className="font-semibold">{item.model || "N/A"}</span>
-                  </div>
-                  {item.location && (
-                    <div className="flex justify-between">
-                      <span>Joylashuv:</span>
-                      <span className="font-semibold">{item.location}</span>
-                    </div>
-                  )}
-                </div>
-                <div className="flex justify-between mt-2 text-sm">
-                  <span>
-                    {item.quantity} dona x ${item.price.toFixed(2)}
-                  </span>
-                  <span className="font-bold">${(item.quantity * item.price).toFixed(2)}</span>
-                </div>
-                {index < receiptData.items.length - 1 && (
-                  <div className="border-t border-dotted border-gray-400 mt-3"></div>
-                )}
-              </div>
-            ))}
-          </div>
-
-          <div className="border-t-2 border-dashed border-gray-800 my-4"></div>
-
-          <div className="flex justify-between text-xl font-bold mb-4">
-            <span>JAMI:</span>
-            <span>${receiptData.totalAmount.toLocaleString()}</span>
-          </div>
-
-          <div className="border-t-2 border-dashed border-gray-800 my-3"></div>
-        </div>
-      )}
+        )
+      })}
+    </div>
+    <div className="border-t-2 border-dashed border-gray-800 my-3"></div>
+    <div className="flex justify-between text-xl font-bold mb-2">
+      <span>JAMI:</span>
+      <span>
+        ${receiptData.items
+          .reduce((sum: number, item: any) => {
+            const profitPercent = Number(item.profitPercent) || 0
+            const basePrice = Number(item.price)
+            const profitPrice = profitPercent > 0
+              ? basePrice + (basePrice * profitPercent / 100)
+              : basePrice
+            return sum + profitPrice * item.quantity
+          }, 0)
+          .toLocaleString()}
+      </span>
+    </div>
+    <div className="flex justify-between text-xl font-bold mb-2">
+      <span>JAMI:</span>
+      <span>
+        {(
+          receiptData.items.reduce((sum: number, item: any) => {
+            const profitPercent = Number(item.profitPercent) || 0
+            const basePrice = Number(item.price)
+            const profitPrice = profitPercent > 0
+              ? basePrice + (basePrice * profitPercent / 100)
+              : basePrice
+            return sum + profitPrice * item.quantity
+          }, 0) * exchangeRate
+        ).toLocaleString()} so'm
+      </span>
+    </div>
+  </div>
+)}
     </div>
   )
 }

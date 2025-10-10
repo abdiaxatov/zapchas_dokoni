@@ -160,16 +160,6 @@
     z-index: 9999 !important;
   }
 
-  /* Page setup for thermal printer */
-  @page {
-    size: 80mm auto;
-    margin: 0;
-  }
 
-  /* Reset body */
-  body {
-    margin: 0 !important;
-    padding: 0 !important;
-    background: white !important;
-  }
 }
+
