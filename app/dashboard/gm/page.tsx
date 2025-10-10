@@ -8,6 +8,7 @@ import { useLanguage } from "@/contexts/language-context"
 import { useToast } from "@/components/ui/toast"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Dialog,
@@ -103,6 +104,7 @@ import {
 import { DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Timestamp } from "firebase/firestore"
+import { toast } from "@/hooks/use-toast"
 
 export default function GMPage() {
   const { user, loading } = useAuth()
@@ -153,10 +155,8 @@ export default function GMPage() {
   const [selectedGMs, setSelectedGMs] = useState<Set<string>>(new Set())
   const [isBulkSellModalOpen, setIsBulkSellModalOpen] = useState(false)
   const [bulkSellQuantities, setBulkSellQuantities] = useState<Record<string, number>>({})
-  const [showReceipt, setShowReceipt] = useState(false)
-  const [isPrinting, setIsPrinting] = useState(false)
   const [receiptData, setReceiptData] = useState<any>(null)
-  const [saleGMs, setSaleGMs] = useState<SaleGM[]>([])
+  const [saleTransactions, setSaleGMs] = useState<SaleGM[]>([])
   const [salesHistoryFilter, setSalesHistoryFilter] = useState<"all" | "today" | "week" | "month">("all")
 
   const [loans, setLoans] = useState<LoanRecord[]>([])
@@ -207,6 +207,7 @@ export default function GMPage() {
     kompaniya: "",
     narxi: "",
     stock: "0",
+    source: "",
     minStock: "10",
     maxStock: "1000",
     location: "",
@@ -221,6 +222,8 @@ export default function GMPage() {
     paymentType: "naqd" as "naqd" | "qarz",
     debtQuantity: "",
     debtPrice: "",
+    profitPercent: "", // 🔹 Foiz
+    profitPrice: "",
   })
   const fileInputRef = useRef<HTMLInputElement>(null) // Declared fileInputRef
   const [isAddModalOpen, setIsAddModalOpen] = useState(false) // Declared isAddModalOpen state
@@ -228,16 +231,23 @@ export default function GMPage() {
   const [exchangeRate, setExchangeRate] = useState(12500) // Default: 1 USD = 12500 UZS
   const [showExchangeRateModal, setShowExchangeRateModal] = useState(false)
   const [tempExchangeRate, setTempExchangeRate] = useState("12500")
+  const [dateFilter, setDateFilter] = useState<"all" | "today" | "week" | "month" | "year">("all")
+
+  const calculatedProfitPrice = useMemo(() => {
+    const price = Number.parseFloat(formData.narxi) || 0
+    const percent = Number.parseFloat(formData.profitPercent) || 0
+    return price + (price * percent) / 100
+  }, [formData.narxi, formData.profitPercent])
 
   useEffect(() => {
-  if (typeof window !== "undefined") {
-    const savedRate = localStorage.getItem("exchangeRate")
-    if (savedRate && !isNaN(Number(savedRate))) {
-      setExchangeRate(Number(savedRate))
-      setTempExchangeRate(savedRate)
+    if (typeof window !== "undefined") {
+      const savedRate = localStorage.getItem("exchangeRate")
+      if (savedRate && !isNaN(Number(savedRate))) {
+        setExchangeRate(Number(savedRate))
+        setTempExchangeRate(savedRate)
+      }
     }
-  }
-}, [])
+  }, [])
 
   useEffect(() => {
     if (!loading && !user) {
@@ -269,12 +279,12 @@ export default function GMPage() {
       if (user) {
         setIsInitialLoading(true)
         try {
-          const [GMsData, loansData, transactionsData] = await Promise.all([
+          const [productsData, loansData, transactionsData] = await Promise.all([
             getGMs(),
             getLoans(),
             getSaleGMs(),
           ])
-          setData(GMsData)
+          setData(productsData)
           setLoans(loansData)
           setSaleGMs(transactionsData)
           loadLowStockGMs()
@@ -302,13 +312,13 @@ export default function GMPage() {
   const loadGMs = async () => {
     try {
       setIsLoading(true)
-      const GMs = await getGMs()
-      setData(GMs)
+      const products = await getGMs()
+      setData(products)
     } catch (error) {
-      console.error("Error loading GMs:", error)
+      console.error("Error loading products:", error)
       showToast({
         title: t("common.error"),
-        description: "Failed to load GMs",
+        description: "Failed to load products",
         variant: "destructive",
       })
     } finally {
@@ -321,7 +331,7 @@ export default function GMPage() {
       const lowStock = await getLowStockGMs()
       setLowStockGMs(lowStock)
     } catch (error) {
-      console.error("Error loading low stock GMs:", error)
+      console.error("Error loading low stock products:", error)
     }
   }
 
@@ -354,13 +364,13 @@ export default function GMPage() {
       return
     }
 
-    data.forEach((GM) => {
-      // Assuming GM.sold represents sales for that GM.
+    data.forEach((product) => {
+      // Assuming product.sold represents sales for that product.
       // If sales trend should be based on sale transactions, this needs to be re-evaluated.
-      // For now, assuming it's based on total sold quantity per GM category or similar.
+      // For now, assuming it's based on total sold quantity per product category or similar.
       // This calculation might need to be based on actual sale transactions for a more accurate trend.
       const month = new Date().toLocaleString("default", { month: "short" }) // Simplified for example
-      monthlySales[month] = (monthlySales[month] || 0) + (GM.sold || 0)
+      monthlySales[month] = (monthlySales[month] || 0) + (product.sold || 0)
     })
     const trendData = Object.entries(monthlySales).map(([month, sales]) => ({ month, sales }))
     setSalesTrendData(trendData)
@@ -369,8 +379,8 @@ export default function GMPage() {
   // Added function to calculate category distribution data
   const calculateCategoryData = () => {
     const categoryCounts: { [key: string]: number } = {}
-    data.forEach((GM) => {
-      const category = GM.category || "Uncategorized"
+    data.forEach((product) => {
+      const category = product.category || "Uncategorized"
       categoryCounts[category] = (categoryCounts[category] || 0) + 1
     })
     const chartData = Object.entries(categoryCounts).map(([name, value]) => ({ name, value }))
@@ -385,7 +395,7 @@ export default function GMPage() {
     if (checked) {
       const allIds = new Set(paginatedData.map((p) => p.id).filter(Boolean) as string[])
       setSelectedGMs(allIds)
-      // Initialize quantities for all selected GMs
+      // Initialize quantities for all selected products
       const quantities: Record<string, number> = {}
       paginatedData.forEach((p) => {
         if (p.id) quantities[p.id] = 1
@@ -397,89 +407,106 @@ export default function GMPage() {
     }
   }
 
-  const handleSelectGM = (GMId: string, checked: boolean) => {
+  const handleSelectGM = (productId: string, checked: boolean) => {
     const newSelected = new Set(selectedGMs)
     if (checked) {
-      newSelected.add(GMId)
-      setBulkSellQuantities((prev) => ({ ...prev, [GMId]: 1 }))
+      newSelected.add(productId)
+      setBulkSellQuantities((prev) => ({ ...prev, [productId]: 1 }))
     } else {
-      newSelected.delete(GMId)
+      newSelected.delete(productId)
       setBulkSellQuantities((prev) => {
         const updated = { ...prev }
-        delete updated[GMId]
+        delete updated[productId]
         return updated
       })
     }
     setSelectedGMs(newSelected)
   }
+const handleBulkSell = async () => {
+  try {
+    const selectedGMsList = Array.from(selectedGMs)
+      .map((id) => data.find((p) => p.id === id))
+      .filter((p): p is GM => p !== undefined)
 
-  const handleBulkSell = async () => {
-    try {
-      const selectedGMsList = Array.from(selectedGMs)
-        .map((id) => data.find((p) => p.id === id))
-        .filter((p): p is GM => p !== undefined)
+    if (selectedGMsList.length === 0) {
+      showToast({
+        title: t("common.error"),
+        description: "Iltimos, sotish uchun mahsulotlarni tanlang",
+        variant: "destructive",
+      })
+      return
+    }
 
-      if (selectedGMsList.length === 0) {
+    // Validate quantities
+    for (const product of selectedGMsList) {
+      const quantity = bulkSellQuantities[product.id!] || 0
+      if (quantity <= 0) {
         showToast({
           title: t("common.error"),
-          description: "Iltimos, sotish uchun mahsulotlarni tanlang",
+          description: `${product.nomi} uchun miqdor kiriting`,
           variant: "destructive",
         })
         return
       }
-
-      // Validate quantities
-      for (const GM of selectedGMsList) {
-        const quantity = bulkSellQuantities[GM.id!] || 0
-        if (quantity <= 0) {
-          showToast({
-            title: t("common.error"),
-            description: `${GM.nomi} uchun miqdor kiriting`,
-            variant: "destructive",
-          })
-          return
-        }
-        if (quantity > (GM.stock || 0)) {
-          showToast({
-            title: t("common.error"),
-            description: `${GM.nomi} uchun yetarli mahsulot yo'q`,
-            variant: "destructive",
-          })
-          return
-        }
-      }
-
-      // If selling as loan, validate customer data
-      if (sellAsLoan) {
-        if (!loanCustomerData.customerName.trim()) {
-          showToast({
-            title: t("common.error"),
-            description: t("loan.customerName") + " kiritilishi shart",
-            variant: "destructive",
-          })
-          return
-        }
-      }
-
-      // Process sales
-      const saleItems = []
-      for (const GM of selectedGMsList) {
-        const quantity = bulkSellQuantities[GM.id!]
-        await sellGM(GM.id!, quantity)
-
-        const price = Number.parseFloat(GM.narxi.replace(/[^\d.]/g, "")) || 0
-        saleItems.push({
-          GMId: GM.id!,
-          GMName: GM.nomi,
-          GMCode: GM.kodi,
-          company: GM.kompaniya,
-          model: GM.model, // Added model here
-          quantity,
-          price,
-          total: price * quantity,
-          location: GM.location,
+      if (quantity > (product.stock || 0)) {
+        showToast({
+          title: t("common.error"),
+          description: `${product.nomi} uchun yetarli mahsulot yo'q`,
+          variant: "destructive",
         })
+        return
       }
+    }
+
+    // If selling as loan, validate customer data
+    if (sellAsLoan) {
+      if (!loanCustomerData.customerName.trim()) {
+        showToast({
+          title: t("common.error"),
+          description: t("loan.customerName") + " kiritilishi shart",
+          variant: "destructive",
+        })
+        return
+      }
+    }
+
+    // Process sales
+    const saleItems = []
+    for (const product of selectedGMsList) {
+      const quantity = bulkSellQuantities[product.id!]
+      await sellGM(product.id!, quantity)
+
+      const price = Number.parseFloat(product.narxi.replace(/[^\d.]/g, "")) || 0
+      saleItems.push({
+        productId: product.id!,
+        productName: product.nomi,
+        productCode: product.kodi,
+        company: product.kompaniya,
+        model: product.model, // Added model here
+        quantity,
+        price,
+        total: price * quantity,
+        location: product.location,
+        profitPercent: product.profitPercent || 0,
+      })
+    }
+
+    // Calculate totals after saleItems is populated
+    const totalAmountUSD = saleItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
+    const totalAmountUZS = totalAmountUSD * exchangeRate
+
+    const totalProfitUSD = saleItems.reduce((sum, item) => {
+      const percent = Number(item.profitPercent) || 0
+      const price = Number(item.price)
+      const profitPrice = percent > 0 ? price + (price * percent) / 100 : price
+      return sum + profitPrice * item.quantity
+    }, 0)
+    const totalProfitUZS = totalProfitUSD * exchangeRate
+
+    const avgProfitPercent = (() => {
+      const percents = saleItems.filter(i => Number(i.profitPercent) > 0).map(i => Number(i.profitPercent))
+      return percents.length > 0 ? Math.round(percents.reduce((a, b) => a + b, 0) / percents.length) : 0
+    })()
 
       // Create receipt data
       const totalAmount = saleItems.reduce((sum, item) => sum + item.total, 0)
@@ -496,6 +523,7 @@ export default function GMPage() {
         items: saleItems,
         totalAmount,
         receiptNumber,
+        profitPercent: 0, // Umumiy foyda foizi (hozircha 0)
         saleDate: Timestamp.now(),
         isLoan: sellAsLoan,
         amountPaid: sellAsLoan ? 0 : totalAmount,
@@ -510,32 +538,36 @@ export default function GMPage() {
       const transactionId = await saveSaleGM(transactionData)
 
       // If loan, create loan record
-      if (sellAsLoan) {
-        await createLoan({
-          customerName: loanCustomerData.customerName,
-          customerPhone: loanCustomerData.customerPhone,
-          customerAddress: loanCustomerData.customerAddress,
-          transactionId,
-          receiptNumber,
-          totalAmount,
-          amountPaid: 0,
-          amountRemaining: totalAmount,
-          loanDate: Timestamp.now(),
-          dueDate: loanCustomerData.dueDate ? Timestamp.fromDate(new Date(loanCustomerData.dueDate)) : undefined,
-          status: "pending",
-          paymentHistory: [],
-          notes: loanCustomerData.notes,
-        })
+     if (sellAsLoan) {
+  await createLoan({
+    customerName: loanCustomerData.customerName,
+    customerPhone: loanCustomerData.customerPhone,
+    customerAddress: loanCustomerData.customerAddress,
+    transactionId,
+    receiptNumber,
+    totalAmount: totalAmountUSD,
+    amountPaid: 0,
+    amountRemaining: totalAmountUSD,
+    profitPercent: avgProfitPercent,
+    loanDate: Timestamp.now(),
+    dueDate: loanCustomerData.dueDate ? Timestamp.fromDate(new Date(loanCustomerData.dueDate)) : undefined,
+    status: "pending",
+    paymentHistory: [],
+    notes: loanCustomerData.notes,
+    items: saleItems, // <-- har bir itemda profitPercent bor
+    // 🔽 Qo‘shimcha statistik maydonlar
+    totalAmountUZS,
+    totalProfitUSD,
+    totalProfitUZS,
+  })
+  showToast({
+    title: t("common.success"),
+    description: t("loan.loanCreated"),
+    variant: "success",
+  })
+}
 
-        showToast({
-          title: t("common.success"),
-          description: t("loan.loanCreated"),
-          variant: "success",
-        })
-      }
-
-      setReceiptData(receipt)
-      setShowReceipt(true)
+      setReceiptData(null)
       setIsBulkSellModalOpen(false)
       setSelectedGMs(new Set())
       setBulkSellQuantities({})
@@ -557,7 +589,7 @@ export default function GMPage() {
         variant: "success",
       })
     } catch (error) {
-      console.error("Error selling GMs:", error)
+      console.error("Error selling products:", error)
       showToast({
         title: t("common.error"),
         description: "Mahsulotlarni sotishda xatolik yuz berdi",
@@ -566,15 +598,12 @@ export default function GMPage() {
     }
   }
 
-  const printReceipt = () => {
-    console.log("[v0] Starting print, receiptData:", receiptData)
-    setIsPrinting(true)
-    setTimeout(() => {
-      console.log("[v0] isPrinting set to true, calling window.print()")
-      window.print()
-      setIsPrinting(false)
-    }, 100)
-  }
+const printReceipt = () => {
+  setTimeout(() => {
+    window.print()
+    setReceiptData(null) // printdan keyin tozalash
+  }, 100)
+}
 
   const handleCreate = async () => {
     try {
@@ -600,10 +629,12 @@ export default function GMPage() {
         status: ["active", "inactive", "discontinued"].includes(formData.status)
           ? (formData.status as "active" | "inactive" | "discontinued")
           : undefined,
+        profitPercent: Number(formData.profitPercent) || 0, // 🔹 Foizni saqlash
         paymentType: formData.paymentType,
-        // Add debtQuantity and debtPrice if paymentType is 'qarz'
+        source: formData.source,
         debtQuantity: formData.paymentType === "qarz" ? Number.parseInt(formData.debtQuantity) || 0 : undefined,
-        debtPrice: formData.paymentType === "qarz" ? (Number.parseFloat(formData.debtPrice) || 0).toString() : undefined,
+        debtPrice:
+          formData.paymentType === "qarz" ? (Number.parseFloat(formData.debtPrice) || 0).toString() : undefined,
         sold: 0,
       })
 
@@ -616,23 +647,23 @@ export default function GMPage() {
       resetFormData()
       showToast({
         title: t("common.success"),
-        description: t("GMCreated"),
+        description: t("productCreated"),
         variant: "success",
       })
     } catch (error) {
-      console.error("Error creating GM:", error)
+      console.error("Error creating product:", error)
       showToast({
         title: t("common.error"),
-        description: "Failed to create GM",
+        description: "Failed to create product",
         variant: "destructive",
       })
     } finally {
       setIsSubmitting(false)
     }
   }
-const totalDebtGMs = data
-  .filter((GM) => GM.paymentType === "qarz")
-  .reduce((sum, GM) => sum + (Number(GM.debtQuantity) || 0), 0)
+  const totalDebtGMs = data
+    .filter((product) => product.paymentType === "qarz")
+    .reduce((sum, product) => sum + (Number(product.debtQuantity) || 0), 0)
 
   const resetFormData = () => {
     setFormData({
@@ -655,8 +686,11 @@ const totalDebtGMs = data
       status: "active",
       paymentType: "naqd",
       // Reset debt fields
+      source: "",
       debtQuantity: "",
       debtPrice: "",
+      profitPercent: "",
+      profitPrice: "",
     })
   }
 
@@ -679,9 +713,10 @@ const totalDebtGMs = data
       weight: (row.weight || 0).toString(),
       dimensions: row.dimensions || "",
       description: row.description || "",
+      profitPercent: row.profitPercent || "", // 🔹 Foiz
       status: row.status || "active",
       paymentType: row.paymentType || "naqd",
-      // Initialize debt fields from existing GM data
+      source: row.source || "", // 🔹 Qayerdan olib kelindi maydoni qo‘shildi
       debtQuantity: row.debtQuantity ? row.debtQuantity.toString() : "",
       debtPrice: row.debtPrice ? row.debtPrice.toString() : "",
     })
@@ -711,9 +746,10 @@ const totalDebtGMs = data
         weight: Number.parseFloat(formData.weight) || 0,
         dimensions: formData.dimensions,
         description: formData.description,
+        profitPercent: Number(formData.profitPercent) || 0, // 🔹 Foizni saqlash
         status: formData.status,
         paymentType: formData.paymentType,
-        // Update debtQuantity and debtPrice if paymentType is 'qarz'
+        source: formData.source,
         debtQuantity: formData.paymentType === "qarz" ? Number.parseInt(formData.debtQuantity) || 0 : undefined,
         debtPrice: formData.paymentType === "qarz" ? Number.parseFloat(formData.debtPrice) || 0 : undefined,
       })
@@ -728,14 +764,14 @@ const totalDebtGMs = data
       resetFormData()
       showToast({
         title: t("common.success"),
-        description: t("GMUpdated"),
+        description: t("productUpdated"),
         variant: "success",
       })
     } catch (error) {
-      console.error("Error updating GM:", error)
+      console.error("Error updating product:", error)
       showToast({
         title: t("common.error"),
-        description: "Failed to update GM",
+        description: "Failed to update product",
         variant: "destructive",
       })
     } finally {
@@ -743,8 +779,8 @@ const totalDebtGMs = data
     }
   }
 
-  const handleDeleteClick = (GM: GM) => {
-    setDeletingGM(GM)
+  const handleDeleteClick = (product: GM) => {
+    setDeletingGM(product)
     setIsDeleteModalOpen(true)
   }
 
@@ -764,14 +800,14 @@ const totalDebtGMs = data
       setDeletingGM(null)
       showToast({
         title: t("common.success"),
-        description: t("GMDeleted"),
+        description: t("productDeleted"),
         variant: "success",
       })
     } catch (error) {
-      console.error("Error deleting GM:", error)
+      console.error("Error deleting product:", error)
       showToast({
         title: t("common.error"),
-        description: "Failed to delete GM",
+        description: "Failed to delete product",
         variant: "destructive",
       })
     } finally {
@@ -795,10 +831,10 @@ const totalDebtGMs = data
         variant: "success",
       })
     } catch (error) {
-      console.error("Error deleting all GMs:", error)
+      console.error("Error deleting all products:", error)
       showToast({
         title: t("common.error"),
-        description: "Failed to delete all GMs",
+        description: "Failed to delete all products",
         variant: "destructive",
       })
     } finally {
@@ -806,8 +842,8 @@ const totalDebtGMs = data
     }
   }
 
-  const handleSell = (GM: GM) => {
-    setSellingGM(GM)
+  const handleSell = (product: GM) => {
+    setSellingGM(product)
     setSellQuantity(1)
     setIsSellModalOpen(true)
   }
@@ -828,14 +864,14 @@ const totalDebtGMs = data
       setSellQuantity(1)
       showToast({
         title: t("common.success"),
-        description: t("GMSold", { quantity: sellQuantity, name: sellingGM.nomi }),
+        description: t("productSold", { quantity: sellQuantity, name: sellingGM.nomi }),
         variant: "success",
       })
     } catch (error) {
-      console.error("Error selling GM:", error)
+      console.error("Error selling product:", error)
       showToast({
         title: t("common.error"),
-        description: "Failed to sell GM",
+        description: "Failed to sell product",
         variant: "destructive",
       })
     } finally {
@@ -843,8 +879,8 @@ const totalDebtGMs = data
     }
   }
 
-  const handleStockAction = (GM: GM, action: "add" | "remove") => {
-    setStockGM(GM)
+  const handleStockAction = (product: GM, action: "add" | "remove") => {
+    setStockGM(product)
     setStockAction(action)
     setStockQuantity(1)
     setIsStockModalOpen(true)
@@ -887,8 +923,8 @@ const totalDebtGMs = data
     }
   }
 
-  const handleViewDetails = (GM: GM) => {
-    setViewingGM(GM)
+  const handleViewDetails = (product: GM) => {
+    setViewingGM(product)
     setIsDetailsModalOpen(true)
   }
 
@@ -961,8 +997,8 @@ const totalDebtGMs = data
             successCount++
             setUploadProgress(10 + ((i + 1) / totalRows) * 80)
           } catch (error) {
-            console.error("Error adding GM:", error)
-            errors.push(`Failed to add GM: ${row[0]}`)
+            console.error("Error adding product:", error)
+            errors.push(`Failed to add product: ${row[0]}`)
           }
         }
 
@@ -976,7 +1012,7 @@ const totalDebtGMs = data
 
         showToast({
           title: t("common.success"),
-          description: `${successCount} GMs imported successfully${errors.length > 0 ? `. ${errors.length} errors occurred.` : ""}`,
+          description: `${successCount} products imported successfully${errors.length > 0 ? `. ${errors.length} errors occurred.` : ""}`,
           variant: "success",
         })
 
@@ -1002,28 +1038,28 @@ const totalDebtGMs = data
   }
 
   const handleExportExcel = () => {
-    const exportData = data.map((GM) => ({
-      KODI: GM.kodi,
-      MODEL: GM.model,
-      NOMI: GM.nomi,
-      KOMPANIYA: GM.kompaniya,
-      NARXI: GM.narxi,
-      SOLD: GM.sold || 0,
-      STOCK: GM.stock || 0,
-      MIN_STOCK: GM.minStock || 0,
-      MAX_STOCK: GM.maxStock || 0,
-      LOCATION: GM.location || "",
-      CATEGORY: GM.category || "",
-      SUPPLIER: GM.supplier || "",
-      COST: GM.cost || "",
-      STATUS: GM.status || "active",
-      BARCODE: GM.barcode || "",
-      WEIGHT: GM.weight || 0,
-      DIMENSIONS: GM.dimensions || "",
-      DESCRIPTION: GM.description || "",
+    const exportData = data.map((product) => ({
+      KODI: product.kodi,
+      MODEL: product.model,
+      NOMI: product.nomi,
+      KOMPANIYA: product.kompaniya,
+      NARXI: product.narxi,
+      SOLD: product.sold || 0,
+      STOCK: product.stock || 0,
+      MIN_STOCK: product.minStock || 0,
+      MAX_STOCK: product.maxStock || 0,
+      LOCATION: product.location || "",
+      CATEGORY: product.category || "",
+      SUPPLIER: product.supplier || "",
+      COST: product.cost || "",
+      STATUS: product.status || "active",
+      BARCODE: product.barcode || "",
+      WEIGHT: product.weight || 0,
+      DIMENSIONS: product.dimensions || "",
+      DESCRIPTION: product.description || "",
       // Include debtQuantity and debtPrice in export
-      DEBT_QUANTITY: GM.debtQuantity || 0,
-      DEBT_PRICE: GM.debtPrice || 0,
+      DEBT_QUANTITY: product.debtQuantity || 0,
+      DEBT_PRICE: product.debtPrice || 0,
     }))
 
     const ws = XLSX.utils.json_to_sheet(exportData)
@@ -1063,7 +1099,33 @@ const totalDebtGMs = data
         matchesStock = (row.stock || 0) > (row.minStock || 10)
       }
 
-      return matchesSearch && matchesCompany && matchesCategory && matchesStatus && matchesStock
+      let matchesDate = true
+      if (dateFilter !== "all") {
+        if (!row.createdAt) {
+          console.log("[v0] GM without createdAt:", row.nomi, row.kodi)
+          matchesDate = false // Don't show products without createdAt when filter is active
+        } else {
+          const now = new Date()
+          const productDate = row.createdAt.toDate()
+
+          if (dateFilter === "today") {
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+            matchesDate = productDate >= today
+            console.log("[v0] Today filter - GM:", row.nomi, "Date:", productDate, "Matches:", matchesDate)
+          } else if (dateFilter === "week") {
+            const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+            matchesDate = productDate >= weekAgo
+          } else if (dateFilter === "month") {
+            const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+            matchesDate = productDate >= monthAgo
+          } else if (dateFilter === "year") {
+            const yearAgo = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000)
+            matchesDate = productDate >= yearAgo
+          }
+        }
+      }
+
+      return matchesSearch && matchesCompany && matchesCategory && matchesStatus && matchesStock && matchesDate
     })
 
     if (sortColumn) {
@@ -1090,7 +1152,17 @@ const totalDebtGMs = data
     }
 
     return filtered
-  }, [data, searchTerm, companyFilter, categoryFilter, statusFilter, stockFilter, sortColumn, sortDirection])
+  }, [
+    data,
+    searchTerm,
+    companyFilter,
+    categoryFilter,
+    statusFilter,
+    stockFilter,
+    sortColumn,
+    sortDirection,
+    dateFilter,
+  ]) // Added dateFilter dependency
 
   const totalPages = Math.ceil(filteredData.length / itemsPerPage)
   const startIndex = (currentPage - 1) * itemsPerPage
@@ -1100,7 +1172,7 @@ const totalDebtGMs = data
   // Reset to first page when filters change
   useEffect(() => {
     setCurrentPage(1)
-  }, [searchTerm, companyFilter, categoryFilter, statusFilter, stockFilter, itemsPerPage])
+  }, [searchTerm, companyFilter, categoryFilter, statusFilter, stockFilter, itemsPerPage, dateFilter]) // Added dateFilter
 
   const uniqueCompanies = useMemo(() => {
     return Array.from(new Set(data.map((item) => item.kompaniya).filter(Boolean)))
@@ -1115,44 +1187,59 @@ const totalDebtGMs = data
     setShowFilters(true)
   }
 
-  const totalSales = data.reduce((sum, GM) => sum + (GM.sold || 0), 0)
+  const totalSales = data.reduce((sum, product) => sum + (product.sold || 0), 0)
 
-  const totalRevenue = data.reduce((sum, GM) => {
-    const price = Number.parseFloat(GM.narxi?.toString().replace(/[^0-9.-]/g, "")) || 0
-    const sold = GM.sold || 0
+  const totalRevenue = data.reduce((sum, product) => {
+    const price = Number.parseFloat(product.narxi?.toString().replace(/[^0-9.-]/g, "")) || 0
+    const sold = product.sold || 0
     return sum + sold * price
+  }, 0)
+  const totalProfit = data.reduce((sum, product) => {
+    const price = Number.parseFloat(product.narxi?.toString().replace(/[^0-9.-]/g, "")) || 0
+    const cost = Number.parseFloat(product.cost?.toString().replace(/[^0-9.-]/g, "")) || 0
+    const sold = product.sold || 0
+    const profitPercent = Number(product.profitPercent) || 0
+
+    // Agar cost bor bo‘lsa, narx - cost, aks holda profitPercent ishlatiladi
+    let profit = 0
+    if (cost > 0) {
+      profit = (price - cost) * sold
+    } else if (profitPercent > 0) {
+      profit = ((price * profitPercent) / 100) * sold
+    }
+    return sum + profit
   }, 0)
 
   const averagePrice =
     data.length > 0
-      ? data.reduce((sum, GM) => {
-          const price = Number.parseFloat(GM.narxi?.toString().replace(/[^0-9.-]/g, "")) || 0
+      ? data.reduce((sum, product) => {
+          const price = Number.parseFloat(product.narxi?.toString().replace(/[^0-9.-]/g, "")) || 0
           return sum + (isNaN(price) ? 0 : price)
         }, 0) / data.length
       : 0
 
-  const outOfStockGMs = data.filter((GM) => (GM.stock || 0) === 0)
-  const currentLowStockGMs = data.filter((GM) => {
-    const stock = GM.stock || 0
-    const minStock = GM.minStock || 10
+  const outOfStockGMs = data.filter((product) => (product.stock || 0) === 0)
+  const currentLowStockGMs = data.filter((product) => {
+    const stock = product.stock || 0
+    const minStock = product.minStock || 10
     return stock > 0 && stock <= minStock
   })
 
   const companyStats = data.reduce(
-    (acc, GM) => {
-      const company = GM.kompaniya || "Unknown"
-      const price = Number.parseFloat(GM.narxi?.toString().replace(/[^0-9.-]/g, "")) || 0
-      const sold = GM.sold || 0
+    (acc, product) => {
+      const company = product.kompaniya || "Unknown"
+      const price = Number.parseFloat(product.narxi?.toString().replace(/[^0-9.-]/g, "")) || 0
+      const sold = product.sold || 0
 
       if (!acc[company]) {
-        acc[company] = { name: company, sales: 0, GMs: 0, revenue: 0 }
+        acc[company] = { name: company, sales: 0, products: 0, revenue: 0 }
       }
       acc[company].sales += sold
-      acc[company].GMs += 1
+      acc[company].products += 1
       acc[company].revenue += sold * (isNaN(price) ? 0 : price)
       return acc
     },
-    {} as Record<string, { name: string; sales: number; GMs: number; revenue: number }>,
+    {} as Record<string, { name: string; sales: number; products: number; revenue: number }>,
   )
 
   const companyChartData = Object.values(companyStats)
@@ -1167,8 +1254,8 @@ const totalDebtGMs = data
     { name: "100K+", min: 100000, max: Number.POSITIVE_INFINITY, count: 0 },
   ]
 
-  data.forEach((GM) => {
-    const price = Number.parseFloat(GM.narxi?.toString().replace(/[^0-9.-]/g, "") || "0")
+  data.forEach((product) => {
+    const price = Number.parseFloat(product.narxi?.toString().replace(/[^0-9.-]/g, "") || "0")
     if (!isNaN(price)) {
       const range = priceRanges.find((r) => price >= r.min && price < r.max)
       if (range) range.count++
@@ -1176,20 +1263,20 @@ const totalDebtGMs = data
   })
 
   const bestSellingGMs = data
-    .filter((GM) => (GM.sold || 0) > 0)
+    .filter((product) => (product.sold || 0) > 0)
     .sort((a, b) => (b.sold || 0) - (a.sold || 0))
     .slice(0, 10)
-    .map((GM, index) => ({
+    .map((product, index) => ({
       rank: index + 1,
-      name: GM.nomi || "Unknown",
-      company: GM.kompaniya || "Unknown",
-      sold: GM.sold || 0,
-      revenue: (GM.sold || 0) * Number.parseFloat(GM.narxi?.toString().replace(/[^0-9.-]/g, "") || "0"),
+      name: product.nomi || "Unknown",
+      company: product.kompaniya || "Unknown",
+      sold: product.sold || 0,
+      revenue: (product.sold || 0) * Number.parseFloat(product.narxi?.toString().replace(/[^0-9.-]/g, "") || "0"),
     }))
 
   // Stock analytics
   const stockAnalytics = {
-    available: data.filter((GM) => (GM.stock || 0) > (GM.minStock || 5)).length,
+    available: data.filter((product) => (product.stock || 0) > (product.minStock || 5)).length,
     lowStock: currentLowStockGMs.length,
     outOfStock: outOfStockGMs.length,
   }
@@ -1265,14 +1352,14 @@ const totalDebtGMs = data
   // Updated filteredSales to correctly include paid loans with their items
   const filteredSales = useMemo(() => {
     // Get regular sales (non-loan transactions)
-    const regularSales = saleGMs.filter((transaction) => !transaction.isLoan)
+    const regularSales = saleTransactions.filter((transaction) => !transaction.isLoan)
 
     // Get paid loans and map them with their transaction items
     const paidLoans = loans
       .filter((loan) => loan.status === "paid")
       .map((loan) => {
-        // Find the corresponding transaction to get GM items
-        const transaction = saleGMs.find((t) => t.id === loan.transactionId)
+        // Find the corresponding transaction to get product items
+        const transaction = saleTransactions.find((t) => t.id === loan.transactionId)
 
         return {
           id: loan.id,
@@ -1317,19 +1404,19 @@ const totalDebtGMs = data
     return dateFilteredSales.filter((transaction) => {
       const receiptMatch = transaction.receiptNumber.toLowerCase().includes(searchLower)
       const dateMatch = transaction.saleDate?.toDate?.()?.toLocaleDateString("uz-UZ").includes(searchLower)
-      const GMMatch = transaction.items.some(
+      const productMatch = transaction.items.some(
         (item) =>
-          item.GMName.toLowerCase().includes(searchLower) ||
-          item.GMCode?.toLowerCase().includes(searchLower) ||
+          item.productName.toLowerCase().includes(searchLower) ||
+          item.productCode?.toLowerCase().includes(searchLower) ||
           item.company?.toLowerCase().includes(searchLower),
       )
       const customerMatch =
         (transaction.customerName?.toLowerCase().includes(searchLower) ||
           transaction.customerPhone?.toLowerCase().includes(searchLower)) ??
         false
-      return receiptMatch || dateMatch || GMMatch || customerMatch
+      return receiptMatch || dateMatch || productMatch || customerMatch
     })
-  }, [saleGMs, loans, salesHistoryFilter, salesSearchQuery])
+  }, [saleTransactions, loans, salesHistoryFilter, salesSearchQuery])
 
   const loansTotalPages = Math.ceil(filteredLoans.length / loansPerPage)
   const loansStartIndex = (loansPage - 1) * loansPerPage
@@ -1379,7 +1466,7 @@ const totalDebtGMs = data
     const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)
     const monthAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000)
 
-    return saleGMs.filter((transaction) => {
+    return saleTransactions.filter((transaction) => {
       if (transaction.isLoan) {
         return false
       }
@@ -1399,60 +1486,120 @@ const totalDebtGMs = data
     })
   }
 
-const handleAddLoanPayment = async () => {
-  if (!selectedLoan) return
+  const handleAddLoanPayment = async () => {
+    if (!selectedLoan) return
 
-  try {
-    const amount = Number.parseFloat(loanPaymentData.amount)
-    if (isNaN(amount) || amount <= 0) {
+    try {
+      const amount = Number.parseFloat(loanPaymentData.amount)
+      if (isNaN(amount) || amount <= 0) {
+        showToast({
+          title: "Hato",
+          description: "To'g'ri summa kiriting",
+          variant: "destructive",
+        })
+        return
+      }
+
+      if (amount > (selectedLoan.amountRemaining || 0)) {
+        showToast({
+          title: "Hato",
+          description: "Kiritilgan summa qolgan qarzdan ko'p bo'lmasligi kerak!",
+          variant: "destructive",
+        })
+        return
+      }
+
+      await addLoanPayment(selectedLoan.id!, amount, loanPaymentData.note)
+
+      showToast({
+        title: t("common.success"),
+        description: t("loan.paymentSuccess"),
+        variant: "success",
+      })
+
+      setIsLoanPaymentModalOpen(false)
+      setLoanPaymentData({ amount: "", note: "" })
+      setSelectedLoan(null)
+      await loadLoans()
+      await loadPendingLoans()
+      await loadTotalLoanAmount()
+    } catch (error) {
+      console.error("Error adding loan payment:", error)
       showToast({
         title: "Hato",
-        description: "To'g'ri summa kiriting",
+        description: "To'lovni qo'shishda xatolik yuz berdi",
         variant: "destructive",
       })
-      return
     }
-
-    if (amount > (selectedLoan.amountRemaining || 0)) {
-      showToast({
-        title: "Hato",
-        description: "Kiritilgan summa qolgan qarzdan ko'p bo'lmasligi kerak!",
-        variant: "destructive",
-      })
-      return
-    }
-
-    await addLoanPayment(selectedLoan.id!, amount, loanPaymentData.note)
-
-    showToast({
-      title: t("common.success"),
-      description: t("loan.paymentSuccess"),
-      variant: "success",
+  }// Export selected products to Excel
+const handleExportSelected = () => {
+  if (selectedGMs.size === 0) {
+    toast({
+      title: "Ogohlantirish", 
+      description: "Avval mahsulotlarni tanlang",
+      variant: "warning"
     })
-
-    setIsLoanPaymentModalOpen(false)
-    setLoanPaymentData({ amount: "", note: "" })
-    setSelectedLoan(null)
-    await loadLoans()
-    await loadPendingLoans()
-    await loadTotalLoanAmount()
-  } catch (error) {
-    console.error("Error adding loan payment:", error)
-    showToast({
-      title: "Hato",
-      description: "To'lovni qo'shishda xatolik yuz berdi",
-      variant: "destructive",
-    })
+    return
   }
+
+  // Get selected products data
+  const selectedData = data.filter(product => selectedGMs.has(product.id))
+
+  // Prepare data for Excel
+  const exportData = selectedData.map(product => ({
+    'MANBA': product.source || '-',
+    'KOD': product.kodi,
+    'MODEL': product.model || '-',
+    'NOMI': product.nomi,
+    'KOMPANIYA': product.kompaniya,
+    'JOYLASHUV': product.location || '-',
+    'NARXI ($)': product.narxi,
+    "NARXI (SO'M)": Number(product.narxi.replace(/[^\d.]/g, '')) * exchangeRate,
+    'OMBORDA': product.stock || 0,
+    'MIN.SONI': product.minStock || 10,
+    'MAX.SONI': product.maxStock || 1000,
+    'KATEGORIYA': product.category || '-',
+    'HOLAT': product.status || 'active',
+    'SOTILGAN': product.sold || 0,
+    'FOIZ': product.profitPercent || 0,
+    'FOIZLI NARX ($)': (() => {
+      const price = Number(product.narxi.replace(/[^\d.]/g, ''))
+      const percent = Number(product.profitPercent) || 0
+      return percent > 0 ? price + (price * percent / 100) : price
+    })(),
+    "FOIZLI NARX (SO'M)": (() => {
+      const price = Number(product.narxi.replace(/[^\d.]/g, ''))
+      const percent = Number(product.profitPercent) || 0
+      const profitPrice = percent > 0 ? price + (price * percent / 100) : price
+      return profitPrice * exchangeRate
+    })()
+  }))
+
+  // Create Excel workbook
+  const ws = XLSX.utils.json_to_sheet(exportData)
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, "Tanlangan Mahsulotlar")
+  
+  // Generate filename with current date
+  const fileName = `tanlangan_mahsulotlar_${new Date().toISOString().split('T')[0]}.xlsx`
+
+  // Download Excel file
+  XLSX.writeFile(wb, fileName)
+
+  toast({
+    title: "Muvaffaqiyatli",
+    description: `${selectedGMs.size} ta mahsulot eksport qilindi`,
+    variant: "success"
+  })
 }
 
-  // Render function for the loans table with GM details
+  // Render function for the loans table with product details
   const renderLoansTable = () => {
     return (
       <div className="space-y-4">
         {paginatedLoans.map((loan) => {
-          // Find the transaction to get GM items
-          const transaction = saleGMs.find((t) => t.id === loan.transactionId)
+          // Find the transaction to get product items
+          const transaction = saleTransactions.find((t) => t.id === loan.transactionId)
           const items = transaction?.items || []
 
           return (
@@ -1471,45 +1618,96 @@ const handleAddLoanPayment = async () => {
                       </div>
 
                       {/* GM Details */}
-                      {items.length > 0 && (
-                        <div className="mt-3 p-3 bg-gray-50 rounded-lg">
-                          <p className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
-                            <Package className="h-3 w-3" />
-                            Mahsulotlar:
-                          </p>
-                          <div className="space-y-1.5">
-                            {items.map((item, idx) => (
-                              <div key={idx} className="text-sm">
-                                <div className="flex items-start justify-between gap-2">
-                                  <div className="flex-1">
-                                    <p className="font-medium text-gray-900">{item.GMName}</p>
-                                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-600 mt-0.5">
-                                      <span>Kod: {item.GMCode}</span>
-                                      <span>•</span>
-                                      <span>{item.company}</span>
-                                      {item.location && (
-                                        <>
-                                          <span>•</span>
-                                          <span className="flex items-center gap-0.5">
-                                            <MapPin className="h-3 w-3" />
-                                            {item.location}
-                                          </span>
-                                        </>
-                                      )}
-                                    </div>
-                                  </div>
-                                  <div className="text-right whitespace-nowrap">
-                                    <p className="text-xs text-gray-600">
-                                      {item.quantity} x ${item.price.toFixed(2)}
-                                    </p>
-                                    <p className="font-semibold text-sm">${(item.quantity * item.price).toFixed(2)}</p>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
+                     {items.length > 0 && (
+            <div className="mt-3 p-3 bg-gray-50 rounded-lg">
+              <p className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
+                <Package className="h-3 w-3" />
+                Mahsulotlar:
+              </p>
+              <div className="space-y-1.5">
+                {items.map((item, idx) => {
+                  const profitPercent = Number(item.profitPercent) || 0
+                  const basePrice = Number(item.price)
+                  const profitPrice = profitPercent > 0 ? basePrice + (basePrice * profitPercent) / 100 : basePrice
+                  const totalBasePrice = basePrice * item.quantity
+                  const totalProfitPrice = profitPrice * item.quantity
+                  const profitOnly = profitPercent > 0 ? (basePrice * profitPercent / 100) * item.quantity : 0
+
+                  return (
+                    <div key={idx} className="text-sm">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1">
+                          <p className="font-medium text-gray-900">{item.productName}</p>
+                          <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-600 mt-0.5">
+                            <span>Kod: {item.productCode}</span>
+                            <span>•</span>
+                            <span>{item.company}</span>
+                            {item.location && (
+                              <>
+                                <span>•</span>
+                                <span className="flex items-center gap-0.5">
+                                  <MapPin className="h-3 w-3" />
+                                  {item.location}
+                                </span>
+                              </>
+                            )}
                           </div>
                         </div>
-                      )}
+                        <div className="text-right">
+                          <div className="text-xs text-gray-600">
+                            {item.quantity} x ${basePrice.toLocaleString()}
+                          </div>
+                          <div className="font-semibold text-sm">
+                            ${totalBasePrice.toLocaleString()}
+                          </div>
+                          {profitPercent > 0 && (
+                            <>
+                              <div className="text-xs text-blue-700 mt-1">
+                                Foizli narx: ${totalProfitPrice.toLocaleString()} ({profitPercent}%)
+                              </div>
+                              <div className="text-xs text-green-700">
+                                Foyda: ${profitOnly.toLocaleString()}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+                
+                {/* Total Profit Summary */}
+                <div className="mt-3 pt-3 border-t border-gray-200">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-semibold text-blue-700">
+                      Jami foizli narx:
+                    </span>
+                    <span className="font-bold text-blue-900">
+                      ${items.reduce((sum, item) => {
+                        const percent = Number(item.profitPercent) || 0
+                        const base = Number(item.price)
+                        const profit = percent > 0 ? base + (base * percent) / 100 : base
+                        return sum + profit * item.quantity
+                      }, 0).toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center mt-1">
+                    <span className="text-sm font-semibold text-green-700">
+                      Jami foyda:
+                    </span>
+                    <span className="font-bold text-green-700">
+                      ${items.reduce((sum, item) => {
+                        const p = Number(item.profitPercent) || 0
+                        const base = Number(item.price)
+                        return sum + (p > 0 ? (base * p / 100) * item.quantity : 0)
+                      }, 0).toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
 
                       {/* Financial Info */}
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
@@ -1583,38 +1781,36 @@ const handleAddLoanPayment = async () => {
       </div>
     )
   }
-const totalDebtSum = data
-  .filter((GM) => GM.paymentType === "qarz")
-  .reduce((sum, GM) => sum + (Number(GM.debtPrice) || 0), 0)
+  const totalDebtSum = data
+    .filter((product) => product.paymentType === "qarz")
+    .reduce((sum, product) => sum + (Number(product.debtPrice) || 0), 0)
 
-// 2. Kursni yangilash va localStorage-ga saqlash
-const handleUpdateExchangeRate = () => {
-  const rate = Number.parseFloat(tempExchangeRate)
-  if (!isNaN(rate) && rate > 0) {
-    setExchangeRate(rate)
-    localStorage.setItem("exchangeRate", rate.toString())
-    setShowExchangeRateModal(false)
-    showToast({
-      title: "Muvaffaqiyatli",
-      description: `Valyuta kursi yangilandi: 1$ = ${rate.toLocaleString()} so'm`,
-      variant: "success",
-    })
-  } else {
-    showToast({
-      title: "Xatolik",
-      description: "Iltimos, to'g'ri qiymat kiriting",
-      variant: "destructive",
-    })
+  // 2. Kursni yangilash va localStorage-ga saqlash
+  const handleUpdateExchangeRate = () => {
+    const rate = Number.parseFloat(tempExchangeRate)
+    if (!isNaN(rate) && rate > 0) {
+      setExchangeRate(rate)
+      localStorage.setItem("exchangeRate", rate.toString())
+      setShowExchangeRateModal(false)
+      showToast({
+        title: "Muvaffaqiyatli",
+        description: `Valyuta kursi yangilandi: 1$ = ${rate.toLocaleString()} so'm`,
+        variant: "success",
+      })
+    } else {
+      showToast({
+        title: "Xatolik",
+        description: "Iltimos, to'g'ri qiymat kiriting",
+        variant: "destructive",
+      })
+    }
   }
-}
-
-
 
   return (
     <div className="space-y-6 p-4 lg:p-6">
       {/* Header */}
-   
-            {/* Modified header to include currency exchange rate button */}
+
+      {/* Modified header to include currency exchange rate button */}
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">hyundai & kia</h1>
@@ -1675,18 +1871,69 @@ const handleUpdateExchangeRate = () => {
 
       {/* Statistics Overview Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-6">
-      
-   <Card className="border-0 shadow-lg bg-gradient-to-br from-orange-50 to-orange-100 hover:shadow-xl transition-all duration-300">
-  <CardContent className="p-3 lg:p-6 text-center">
-    <div className="p-2 lg:p-3 bg-orange-500 rounded-full w-fit mx-auto mb-2 lg:mb-4">
-      <HandCoins className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
-    </div>
-    <p className="text-xs lg:text-sm font-medium text-orange-700"> Jami qarz summa</p>
-<p className=" text-lg lg:text-2xl font-bold text-orange-900">{totalDebtSum.toLocaleString()} $</p>
-    <p className="text-xs text-orange-700 mt-1">Qarzga olingan mahsulotlar:{totalDebtGMs.toLocaleString()}</p>
-
-  </CardContent>
-</Card>
+        <Card className="border-0 shadow-lg bg-gradient-to-br from-orange-50 to-orange-100 hover:shadow-xl transition-all duration-300">
+          <CardContent className="p-3 lg:p-6 text-center">
+            <div className="p-2 lg:p-3 bg-orange-500 rounded-full w-fit mx-auto mb-2 lg:mb-4">
+              <HandCoins className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
+            </div>
+            <p className="text-xs lg:text-sm font-medium text-orange-700"> Jami qarz summa</p>
+            <p className="text-lg lg:text-2xl font-bold text-orange-900">{totalDebtSum.toLocaleString()} $</p>
+            <p className="text-xs text-orange-700 mt-1">
+              Qarzga olingan mahsulotlar: {totalDebtGMs.toLocaleString()}
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-2 text-orange-700 border-orange-300 hover:bg-orange-100 bg-transparent"
+              onClick={async () => {
+                const qarzGMs = data.filter((product) => product.paymentType === "qarz")
+                for (const product of qarzGMs) {
+                  await updateGM(product.id, {
+                    ...product,
+                    debtPrice: 0,
+                    debtQuantity: 0,
+                  })
+                }
+                await loadGMs()
+                showToast({
+                  title: "Qarzlar tozalandi",
+                  description: "Barcha qarz summalari 0 qilindi.",
+                  variant: "success",
+                })
+              }}
+            >
+              Qarzlarni tozalash
+            </Button>
+          </CardContent>
+        </Card>
+        {formData.paymentType === "qarz" && (
+          <>
+            <div>
+              <Label htmlFor="debtQuantity">Qarz soni (dona) *</Label>
+              <Input
+                id="debtQuantity"
+                type="number"
+                min="0"
+                value={formData.debtQuantity}
+                onChange={(e) => setFormData({ ...formData, debtQuantity: e.target.value })}
+                placeholder="Necha dona qarz"
+                className="border-orange-200 focus:border-orange-400"
+              />
+            </div>
+            <div>
+              <Label htmlFor="debtPrice">Qarz narxi (sum) *</Label>
+              <Input
+                id="debtPrice"
+                type="number"
+                min="0"
+                value={formData.debtPrice}
+                onChange={(e) => setFormData({ ...formData, debtPrice: e.target.value })}
+                placeholder="Qancha sum qarz"
+                className="border-orange-200 focus:border-orange-400"
+              />
+            </div>
+          </>
+        )}
         <Card className="border-0 shadow-lg bg-gradient-to-br from-green-50 to-green-100 hover:shadow-xl transition-all duration-300">
           <CardContent className="p-3 lg:p-6 text-center">
             <div className="p-2 lg:p-3 bg-green-500 rounded-full w-fit mx-auto mb-2 lg:mb-4">
@@ -1704,8 +1951,17 @@ const handleUpdateExchangeRate = () => {
             <div className="p-2 lg:p-3 bg-purple-500 rounded-full w-fit mx-auto mb-2 lg:mb-4">
               <DollarSign className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
             </div>
-            <p className="text-xs lg:text-sm font-medium text-purple-700">{t("totalRevenue")}</p>
+            <p className="text-xs lg:text-sm font-medium text-purple-700">Jami daromad</p>
             <p className="text-lg lg:text-2xl font-bold text-purple-900">${totalRevenue.toLocaleString()}</p>
+          </CardContent>
+        </Card>
+        <Card className="border-0 shadow-lg bg-gradient-to-br from-green-50 to-green-100 hover:shadow-xl transition-all duration-300">
+          <CardContent className="p-3 lg:p-6 text-center">
+            <div className="p-2 lg:p-3 bg-green-500 rounded-full w-fit mx-auto mb-2 lg:mb-4">
+              <TrendingUp className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
+            </div>
+            <p className="text-xs lg:text-sm font-medium text-green-700">Jami foyda</p>
+            <p className="text-lg lg:text-2xl font-bold text-green-900">${totalProfit.toLocaleString()}</p>
           </CardContent>
         </Card>
 
@@ -1830,6 +2086,49 @@ const handleUpdateExchangeRate = () => {
                   </div>
                 </div>
 
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant={dateFilter === "all" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setDateFilter("all")}
+                    className={dateFilter === "all" ? "bg-[#0099b5] hover:bg-[#0099b5]/90" : ""}
+                  >
+                    Barchasi
+                  </Button>
+                  <Button
+                    variant={dateFilter === "today" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setDateFilter("today")}
+                    className={dateFilter === "today" ? "bg-[#0099b5] hover:bg-[#0099b5]/90" : ""}
+                  >
+                    Bugun
+                  </Button>
+                  <Button
+                    variant={dateFilter === "week" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setDateFilter("week")}
+                    className={dateFilter === "week" ? "bg-[#0099b5] hover:bg-[#0099b5]/90" : ""}
+                  >
+                    7 kunlik
+                  </Button>
+                  <Button
+                    variant={dateFilter === "month" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setDateFilter("month")}
+                    className={dateFilter === "month" ? "bg-[#0099b5] hover:bg-[#0099b5]/90" : ""}
+                  >
+                    1 oylik
+                  </Button>
+                  <Button
+                    variant={dateFilter === "year" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setDateFilter("year")}
+                    className={dateFilter === "year" ? "bg-[#0099b5] hover:bg-[#0099b5]/90" : ""}
+                  >
+                    1 yillik
+                  </Button>
+                </div>
+
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                   <div className="flex flex-wrap gap-2">
                     {selectedGMs.size > 0 && (
@@ -1841,6 +2140,14 @@ const handleUpdateExchangeRate = () => {
                         Mahsulotlarni sotish ({selectedGMs.size}) {/* Sell GMs ({count}) */}
                       </Button>
                     )}
+                    <Button 
+  onClick={handleExportSelected} 
+  disabled={selectedGMs.size === 0}
+  className="bg-green-600 hover:bg-green-700 text-white"
+>
+  <Download className="h-4 w-4 mr-2" />
+  Tanlangan mahsulotlarni eksport qilish ({selectedGMs.size})
+</Button>
                     <Button
                       onClick={() => setIsAddModalOpen(true)}
                       className="bg-[#0099b5] hover:bg-[#0099b5]/90 text-white h-9 lg:h-10 text-sm"
@@ -2140,14 +2447,51 @@ const handleUpdateExchangeRate = () => {
                           </div>
                         </td>
                         <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
-                                                    <div className="flex flex-col gap-1">
-                            <span className="font-semibold text-green-600 text-lg">${row.narxi}</span>
+                          <div className="flex flex-col gap-1">
+                            {/* Narx (USD) */}
+                            <span className="font-semibold text-green-600 text-lg">
+                              {row.narxi && !isNaN(Number(row.narxi.toString().replace(/,/g, "")))
+                                ? `$${Number(row.narxi.toString().replace(/,/g, "")).toLocaleString()}`
+                                : "-"}
+                            </span>
+                            {/* Narx (so'mda) */}
                             <span className="text-sm text-gray-500">
-                              {(Number.parseFloat(row.narxi || "0") * exchangeRate).toLocaleString()} so'm
+                              {row.narxi && !isNaN(Number(row.narxi.toString().replace(/,/g, "")))
+                                ? `${(Number(row.narxi.toString().replace(/,/g, "")) * exchangeRate).toLocaleString()} so'm`
+                                : "-"}
+                            </span>
+                            {/* Foizli narx (USD va so'mda) */}
+                            <span className="font-semibold text-blue-700 text-sm">
+                              {row.narxi &&
+                              row.profitPercent &&
+                              !isNaN(Number(row.narxi.toString().replace(/,/g, ""))) &&
+                              !isNaN(Number(row.profitPercent)) &&
+                              Number(row.profitPercent) > 0 ? (
+                                <>
+                                  Foizli narx: $
+                                  {(
+                                    Number(row.narxi.toString().replace(/,/g, "")) +
+                                    (Number(row.narxi.toString().replace(/,/g, "")) * Number(row.profitPercent)) / 100
+                                  ).toLocaleString(undefined, { maximumFractionDigits: 0 })}{" "}
+                                  ({row.profitPercent}%)
+                                  <br />
+                                  <span className="text-xs text-blue-600">
+                                    {(
+                                      (Number(row.narxi.toString().replace(/,/g, "")) +
+                                        (Number(row.narxi.toString().replace(/,/g, "")) * Number(row.profitPercent)) /
+                                          100) *
+                                      exchangeRate
+                                    ).toLocaleString(undefined, { maximumFractionDigits: 0 })}{" "}
+                                    so'm
+                                  </span>
+                                </>
+                              ) : (
+                                "Foiz kiritilmagan"
+                              )}
                             </span>
                           </div>
-
                         </td>
+
                         <td className="py-4 px-6" onClick={() => handleViewDetails(row)}>
                           <Badge
                             className={cn(
@@ -2410,51 +2754,120 @@ const handleUpdateExchangeRate = () => {
 
         <TabsContent value="statistics" className="space-y-4 lg:space-y-6">
           {/* Enhanced Statistics Overview Cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-6">
-            <Card className="border-0 shadow-lg bg-gradient-to-br from-emerald-50 to-emerald-100 hover:shadow-xl transition-all duration-300">
-              <CardContent className="p-4 lg:p-6 text-center">
-                <div className="p-2 lg:p-3 bg-emerald-500 rounded-full w-fit mx-auto mb-3 lg:mb-4">
-                  <DollarSign className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
-                </div>
-                <p className="text-xs lg:text-sm font-medium text-emerald-700">{t("stats.averagePrice")}</p>
-                <p className="text-lg lg:text-2xl font-bold text-emerald-900">
-                  ${isNaN(averagePrice) ? "0.00" : averagePrice.toFixed(2)}
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card className="border-0 shadow-lg bg-gradient-to-br from-red-50 to-red-100 hover:shadow-xl transition-all duration-300">
-              <CardContent className="p-4 lg:p-6 text-center">
-                <div className="p-2 lg:p-3 bg-red-500 rounded-full w-fit mx-auto mb-3 lg:mb-4">
-                  <AlertCircle className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
-                </div>
-                <p className="text-xs lg:text-sm font-medium text-red-700">{t("stats.outOfStockGMs")}</p>
-                <p className="text-lg lg:text-2xl font-bold text-red-900">{outOfStockGMs.length}</p>
-              </CardContent>
-            </Card>
-
-            <Card className="border-0 shadow-lg bg-gradient-to-br from-indigo-50 to-indigo-100 hover:shadow-xl transition-all duration-300">
-              <CardContent className="p-4 lg:p-6 text-center">
-                <div className="p-2 lg:p-3 bg-indigo-500 rounded-full w-fit mx-auto mb-3 lg:mb-4">
-                  <Package className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
-                </div>
-                <p className="text-xs lg:text-sm font-medium text-indigo-700">{t("stats.totalStock")}</p>
-                <p className="text-lg lg:text-2xl font-bold text-indigo-900">
-                  {data.reduce((sum, GM) => sum + (GM.stock || 0), 0).toLocaleString()}
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card className="border-0 shadow-lg bg-gradient-to-br from-amber-50 to-amber-100 hover:shadow-xl transition-all duration-300">
-              <CardContent className="p-4 lg:p-6 text-center">
-                <div className="p-2 lg:p-3 bg-amber-500 rounded-full w-fit mx-auto mb-3 lg:mb-4">
-                  <TrendingUp className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
-                </div>
-                <p className="text-xs lg:text-sm font-medium text-amber-700">{t("stats.inventoryValue")}</p>
-                <p className="text-lg lg:text-2xl font-bold text-amber-900">${inventoryValue.toLocaleString()}</p>
-              </CardContent>
-            </Card>
+           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-6">
+    {/* Jami sotuvlar (barchasi) */}
+    <Card className="border-0 shadow-lg bg-gradient-to-br from-blue-50 to-blue-100 hover:shadow-xl transition-all duration-300">
+      <CardContent className="p-4 lg:p-6">
+        <div className="flex items-center justify-between mb-3">
+          <div className="p-2 lg:p-3 bg-blue-500 rounded-full">
+            <Receipt className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
           </div>
+          <p className="text-xs lg:text-sm font-medium text-blue-700">Jami sotuvlar</p>
+        </div>
+        <div className="space-y-1">
+          <p className="text-2xl font-bold text-blue-900">{filteredSales.length}</p>
+          <p className="text-sm text-blue-700">{totalItemsSold} ta mahsulot</p>
+        </div>
+      </CardContent>
+    </Card>
+
+    {/* Jami daromad va foydalar */}
+    <Card className="border-0 shadow-lg bg-gradient-to-br from-green-50 to-green-100 hover:shadow-xl transition-all duration-300">
+      <CardContent className="p-4 lg:p-6">
+        <div className="flex items-center justify-between mb-3">
+          <div className="p-2 lg:p-3 bg-green-500 rounded-full">
+            <DollarSign className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
+          </div>
+          <p className="text-xs lg:text-sm font-medium text-green-700">Jami daromad</p>
+        </div>
+        <div className="space-y-1">
+          <p className="text-2xl font-bold text-green-900">
+            ${totalRevenue.toLocaleString()}
+          </p>
+          <p className="text-sm text-green-700">
+            {(totalRevenue * exchangeRate).toLocaleString()} so'm
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+
+    {/* Foizli jami narx */}
+    <Card className="border-0 shadow-lg bg-gradient-to-br from-blue-50 to-blue-100 hover:shadow-xl transition-all duration-300">
+      <CardContent className="p-4 lg:p-6">
+        <div className="flex items-center justify-between mb-3">
+          <div className="p-2 lg:p-3 bg-blue-500 rounded-full">
+            <TrendingUp className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
+          </div>
+          <p className="text-xs lg:text-sm font-medium text-blue-700">Foizli jami narx</p>
+        </div>
+        <div className="space-y-1">
+          {(() => {
+            const totalProfitUSD = filteredSales.reduce((sum, sale) => 
+              sum + sale.items.reduce((itemSum, item) => {
+                const percent = Number(item.profitPercent) || 0
+                const base = Number(item.price)
+                const profit = percent > 0 ? base + (base * percent) / 100 : base
+                return itemSum + profit * item.quantity
+              }, 0), 0)
+            const totalProfitUZS = totalProfitUSD * exchangeRate
+            const avgPercent = (() => {
+              const percents = filteredSales.flatMap(sale => 
+                sale.items
+                  .filter(i => Number(i.profitPercent) > 0)
+                  .map(i => Number(i.profitPercent))
+              )
+              return percents.length > 0 
+                ? Math.round(percents.reduce((a,b) => a + b, 0) / percents.length) 
+                : 0
+            })()
+            return (
+              <>
+                <p className="text-2xl font-bold text-blue-900">
+                  ${totalProfitUSD.toLocaleString()}
+                </p>
+                <p className="text-sm text-blue-700">
+                  {totalProfitUZS.toLocaleString()} so'm
+                </p>
+              </>
+            )
+          })()}
+        </div>
+      </CardContent>
+    </Card>
+
+    {/* Faqat foizdan foyda */}
+    <Card className="border-0 shadow-lg bg-gradient-to-br from-green-50 to-green-100 hover:shadow-xl transition-all duration-300">
+      <CardContent className="p-4 lg:p-6">
+        <div className="flex items-center justify-between mb-3">
+          <div className="p-2 lg:p-3 bg-green-500 rounded-full">
+            <DollarSign className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
+          </div>
+          <p className="text-xs lg:text-sm font-medium text-green-700">Foyda (foizdan)</p>
+        </div>
+        <div className="space-y-1">
+          {(() => {
+            const profitOnly = filteredSales.reduce((sum, sale) =>
+              sum + sale.items.reduce((itemSum, item) => {
+                const p = Number(item.profitPercent) || 0
+                const base = Number(item.price)
+                return itemSum + (p > 0 ? (base * p / 100) * item.quantity : 0)
+              }, 0), 0)
+            const profitOnlyUZS = profitOnly * exchangeRate
+            return (
+              <>
+                <p className="text-2xl font-bold text-green-900">
+                  ${profitOnly.toLocaleString()}
+                </p>
+                <p className="text-sm text-green-700">
+                  {profitOnlyUZS.toLocaleString()} so'm
+                </p>
+              </>
+            )
+          })()}
+        </div>
+      </CardContent>
+    </Card>
+  </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
             {/* Company Performance Chart */}
@@ -2576,22 +2989,22 @@ const handleUpdateExchangeRate = () => {
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 lg:gap-4">
-                {bestSellingGMs.map((GM, index) => (
+                {bestSellingGMs.map((product, index) => (
                   <div
                     key={index}
                     className="flex items-center justify-between p-3 lg:p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
                   >
                     <div className="flex items-center gap-3">
                       <div className="flex items-center justify-center w-8 h-8 bg-[#0099b5] text-white rounded-full text-sm font-bold">
-                        #{GM.rank}
+                        #{product.rank}
                       </div>
                       <div>
-                        <p className="font-medium text-gray-900 text-sm">{GM.name}</p>
-                        <p className="text-xs text-gray-600">{GM.company}</p>
+                        <p className="font-medium text-gray-900 text-sm">{product.name}</p>
+                        <p className="text-xs text-gray-600">{product.company}</p>
                       </div>
                     </div>
                     <div className="text-right">
-                      <p className="font-bold text-[#0099b5] text-sm">{GM.sold}</p>
+                      <p className="font-bold text-[#0099b5] text-sm">{product.sold}</p>
                       <p className="text-xs text-gray-500">{t("stats.sold")}</p>
                     </div>
                   </div>
@@ -2608,7 +3021,7 @@ const handleUpdateExchangeRate = () => {
                   <Tag className="h-4 w-4 lg:h-5 lg:w-5 text-[#0099b5]" />
                   {t("stats.categoryDistribution")}
                 </CardTitle>
-                <CardDescription className="text-sm">{t("stats.GMsByCategory")}</CardDescription>
+                <CardDescription className="text-sm">{t("stats.productsByCategory")}</CardDescription>
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={250}>
@@ -2743,17 +3156,22 @@ const handleUpdateExchangeRate = () => {
                   </CardContent>
                 </Card>
 
-                <Card className="bg-gradient-to-br from-green-50 to-green-100">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-green-700 font-medium">Jami summa</p>
-                        <p className="text-2xl font-bold text-green-900">${totalRevenue.toLocaleString()}</p>
-                      </div>
-                      <div className="p-3 bg-green-500 rounded-full">
-                        <DollarSign className="h-6 w-6 text-white" />
-                      </div>
+                <Card className="border-0 shadow-lg bg-gradient-to-br from-purple-50 to-purple-100 hover:shadow-xl transition-all duration-300">
+                  <CardContent className="p-3 lg:p-6 text-center">
+                    <div className="p-2 lg:p-3 bg-purple-500 rounded-full w-fit mx-auto mb-2 lg:mb-4">
+                      <DollarSign className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
                     </div>
+                    <p className="text-xs lg:text-sm font-medium text-purple-700">Jami daromad</p>
+                    <p className="text-lg lg:text-2xl font-bold text-purple-900">${totalRevenue.toLocaleString()}</p>
+                  </CardContent>
+                </Card>
+                <Card className="border-0 shadow-lg bg-gradient-to-br from-green-50 to-green-100 hover:shadow-xl transition-all duration-300">
+                  <CardContent className="p-3 lg:p-6 text-center">
+                    <div className="p-2 lg:p-3 bg-green-500 rounded-full w-fit mx-auto mb-2 lg:mb-4">
+                      <TrendingUp className="h-4 w-4 lg:h-6 lg:w-6 text-white" />
+                    </div>
+                    <p className="text-xs lg:text-sm font-medium text-green-700">Jami foyda</p>
+                    <p className="text-lg lg:text-2xl font-bold text-green-900">${totalProfit.toLocaleString()}</p>
                   </CardContent>
                 </Card>
 
@@ -2829,20 +3247,32 @@ const handleUpdateExchangeRate = () => {
                               </td>
                               <td className="py-3 px-4">
                                 <div className="space-y-1">
-                                  {transaction.items.slice(0, 2).map((item, idx) => (
-                                    <div key={idx} className="text-sm">
-                                      <span className="font-medium text-gray-900">{item.GMName}</span>
-                                      <span className="text-gray-500 ml-2">
-                                        ({item.quantity} x ${item.price.toFixed(2)})
-                                      </span>
-                                    </div>
-                                  ))}
-                                  {transaction.items.length > 2 && (
-                                    <div className="text-sm text-gray-500">
-                                      +{transaction.items.length - 2} ta mahsulot
-                                    </div>
-                                  )}
-                                </div>
+  {transaction.items.slice(0, 2).map((item, idx) => {
+    const profitPercent = Number(item.profitPercent) || 0
+    const basePrice = Number(item.price)
+    const profitPrice = profitPercent > 0
+      ? basePrice + (basePrice * profitPercent / 100)
+      : basePrice
+    return (
+      <div key={idx} className="text-sm">
+        <span className="font-medium text-gray-900">{item.productName}</span>
+        <span className="text-gray-500 ml-2">
+          ({item.quantity} x ${basePrice.toLocaleString()})
+        </span>
+        {profitPercent > 0 && (
+          <span className="block text-xs text-blue-700 ml-6">
+            Foizli narx: ${profitPrice.toLocaleString()} ({profitPercent}%)
+          </span>
+        )}
+      </div>
+    )
+  })}
+  {transaction.items.length > 2 && (
+    <div className="text-sm text-gray-500">
+      +{transaction.items.length - 2} ta mahsulot
+    </div>
+  )}
+</div>
                               </td>
                               <td className="py-3 px-4 text-right">
                                 <span className="font-bold text-green-600 text-lg">
@@ -2850,24 +3280,10 @@ const handleUpdateExchangeRate = () => {
                                 </span>
                               </td>
                               <td className="py-3 px-4 text-center">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    setReceiptData({
-                                      receiptNumber: transaction.receiptNumber,
-                                      items: transaction.items,
-                                      totalAmount: transaction.totalAmount,
-                                      date: saleDate,
-                                    })
-                                    setShowReceipt(true)
-                                  }}
-                                  className="text-[#0099b5] hover:bg-[#0099b5]/10"
-                                >
-                                  <Printer className="h-4 w-4 mr-1" />
-                                  Chek
-                                </Button>
+                                  <Button onClick={printReceipt} className="bg-[#0099b5] hover:bg-[#0099b5]/90 flex-1">
+              <Printer className="h-4 w-4 mr-2" />
+              Chop etish
+            </Button>
                               </td>
                             </tr>
                           )
@@ -2951,144 +3367,229 @@ const handleUpdateExchangeRate = () => {
           </Card>
         </TabsContent>
 
-        <TabsContent value="loans" className="space-y-6">
-          {/* Loan Statistics */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">{t("loan.totalLoans")}</CardTitle>
-                <Wallet className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{loans.length}</div>
-                <p className="text-xs text-muted-foreground mt-1">Jami: ${totalLoanAmount.toLocaleString()}</p>
-              </CardContent>
-            </Card>
+     <TabsContent value="loans" className="space-y-6">
+  {/* Loan Statistics */}
+  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+    {/* Umumiy qarzlar soni va jami */}
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium">{t("loan.totalLoans")}</CardTitle>
+        <Wallet className="h-4 w-4 text-muted-foreground" />
+      </CardHeader>
+      <CardContent>
+        <div className="text-2xl font-bold">{loans.length}</div>
+        <p className="text-xs text-muted-foreground mt-1">
+          Jami: ${totalLoanAmount.toLocaleString()}
+        </p>
+        <p className="text-xs text-muted-foreground mt-1">
+          {(totalLoanAmount * exchangeRate).toLocaleString()} so'm
+        </p>
+      </CardContent>
+    </Card>
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">{t("loan.pendingLoans")}</CardTitle>
-                <AlertCircle className="h-4 w-4 text-orange-500" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{pendingLoans.length}</div>
-                <p className="text-xs text-muted-foreground mt-1">To'lanishi kerak</p>
-              </CardContent>
-            </Card>
+    {/* Foizli jami qarz va foyda */}
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium">Foizli jami qarz</CardTitle>
+        <DollarSign className="h-4 w-4 text-blue-500" />
+      </CardHeader>
+      <CardContent>
+        {/* Foizli jami qarz hisoblash */}
+        {(() => {
+          const total = loans.reduce((sum, loan) =>
+            sum +
+            (loan.items
+              ? loan.items.reduce((itemSum: number, item: any) => {
+                  const profitPercent = Number(item.profitPercent) || 0
+                  const base = Number(item.price)
+                  const profit = profitPercent > 0 ? base + (base * profitPercent) / 100 : base
+                  return itemSum + profit * item.quantity
+                }, 0)
+              : 0),
+          0)
+          const totalUZS = total * exchangeRate
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">{t("loan.paidLoans")}</CardTitle>
-                <CreditCard className="h-4 w-4 text-green-500" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{loans.filter((l) => l.status === "paid").length}</div>
-                <p className="text-xs text-muted-foreground mt-1">To'langan qarzlar</p>
-              </CardContent>
-            </Card>
-          </div>
+          // O'rtacha foiz (agar bitta mahsulot bo'lsa, aniq foiz ko'rsatamiz)
+          let avgPercent = 0
+          let percentCount = 0
+          loans.forEach(loan => {
+            loan.items?.forEach((item: any) => {
+              if (item.profitPercent && Number(item.profitPercent) > 0) {
+                avgPercent += Number(item.profitPercent)
+                percentCount++
+              }
+            })
+          })
+          avgPercent = percentCount > 0 ? Math.round(avgPercent / percentCount) : 0
 
-          {/* Loan Filters */}
-          <Card>
-            <CardHeader>
-              <div className="flex flex-col gap-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>{t("loan.loanList")}</CardTitle>
-                    <CardDescription>Qarzga olganlar ro'yxati va to'lovlar</CardDescription>
-                  </div>
-                </div>
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                    <Input
-                      placeholder="Mijoz ismi, telefon yoki eslatma bo'yicha qidirish..."
-                      value={loanSearchQuery}
-                      onChange={(e) => setLoanSearchQuery(e.target.value)}
-                      className="pl-9 h-10"
-                    />
-                  </div>
-                  <Select value={loanStatusFilter} onValueChange={setLoanStatusFilter}>
-                    <SelectTrigger className="w-full sm:w-[200px] h-10">
-                      <SelectValue placeholder={t("loan.filterStatus")} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">{t("loan.allLoans")}</SelectItem>
-                      <SelectItem value="pending">{t("loan.status.pending")}</SelectItem>
-                      <SelectItem value="partial">{t("loan.status.partial")}</SelectItem>
-                      <SelectItem value="paid">{t("loan.status.paid")}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+          return (
+            <>
+              <div className="text-2xl font-bold text-blue-900">
+                ${total.toLocaleString()}
+                {avgPercent > 0 && (
+                  <span className="text-xs text-blue-700 ml-1">({avgPercent}%)</span>
+                )}
               </div>
-            </CardHeader>
-            <CardContent>
-              {filteredLoans.length === 0 ? (
-                <div className="text-center py-12">
-                  <HandCoins className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                  <p className="text-muted-foreground">
-                    {loanSearchQuery ? "Qidiruv bo'yicha natija topilmadi" : t("loan.noLoans")}
-                  </p>
-                </div>
-              ) : (
-                <>
-                  {renderLoansTable()}
+              <p className="text-xs text-blue-700 mt-1">
+                {totalUZS.toLocaleString()} so'm
+              </p>
+            </>
+          )
+        })()}
+        {/* Foyda (faqat foizdan) */}
+        {(() => {
+          const profit = loans.reduce((sum, loan) =>
+            sum +
+            (loan.items
+              ? loan.items.reduce((itemSum: number, item: any) => {
+                  const p = Number(item.profitPercent) || 0
+                  const base = Number(item.price)
+                  return itemSum + (p > 0 ? (base * p / 100) * item.quantity : 0)
+                }, 0)
+              : 0),
+          0)
+          const profitUZS = profit * exchangeRate
+          return (
+            <>
+              <div className="mt-2 text-green-700 font-semibold text-xs">
+                Foyda (faqat foizdan): ${profit.toLocaleString()}
+              </div>
+              <div className="text-green-700 font-semibold text-xs">
+                {profitUZS.toLocaleString()} so'm
+              </div>
+            </>
+          )
+        })()}
+      </CardContent>
+    </Card>
 
-                  {/* Pagination */}
-                  <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-6 pt-4 border-t">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-gray-600">Sahifada:</span>
-                      <Select
-                        value={loansPerPage.toString()}
-                        onValueChange={(value) => {
-                          setLoansPerPage(Number(value))
-                          setLoansPage(1)
-                        }}
-                      >
-                        <SelectTrigger className="w-[100px] h-9">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="10">10</SelectItem>
-                          <SelectItem value="20">20</SelectItem>
-                          <SelectItem value="50">50</SelectItem>
-                          <SelectItem value="100">100</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <span className="text-sm text-gray-600">
-                        {loansStartIndex + 1}-{Math.min(loansEndIndex, filteredLoans.length)} / {filteredLoans.length}
-                      </span>
-                    </div>
+    {/* To'lanmagan (pending) qarzlar */}
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium">{t("loan.pendingLoans")}</CardTitle>
+        <AlertCircle className="h-4 w-4 text-orange-500" />
+      </CardHeader>
+      <CardContent>
+        <div className="text-2xl font-bold">{pendingLoans.length}</div>
+        <p className="text-xs text-muted-foreground mt-1">To'lanishi kerak</p>
+      </CardContent>
+    </Card>
 
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setLoansPage((p) => Math.max(1, p - 1))}
-                        disabled={loansPage === 1}
-                      >
-                        <ChevronLeft className="h-4 w-4" />
-                      </Button>
-                      <span className="text-sm text-gray-600">
-                        Sahifa {loansPage} / {loansTotalPages}
-                      </span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setLoansPage((p) => Math.min(loansTotalPages, p + 1))}
-                        disabled={loansPage === loansTotalPages}
-                      >
-                        <ChevronRight className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+    {/* To'langan qarzlar */}
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium">{t("loan.paidLoans")}</CardTitle>
+        <CreditCard className="h-4 w-4 text-green-500" />
+      </CardHeader>
+      <CardContent>
+        <div className="text-2xl font-bold">{loans.filter((l) => l.status === "paid").length}</div>
+        <p className="text-xs text-muted-foreground mt-1">To'langan qarzlar</p>
+      </CardContent>
+    </Card>
+  </div>
+
+  {/* Loan Filters */}
+  <Card>
+    <CardHeader>
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle>{t("loan.loanList")}</CardTitle>
+            <CardDescription>Qarzga olganlar ro'yxati va to'lovlar</CardDescription>
+          </div>
+        </div>
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <Input
+              placeholder="Mijoz ismi, telefon yoki eslatma bo'yicha qidirish..."
+              value={loanSearchQuery}
+              onChange={(e) => setLoanSearchQuery(e.target.value)}
+              className="pl-9 h-10"
+            />
+          </div>
+          <Select value={loanStatusFilter} onValueChange={setLoanStatusFilter}>
+            <SelectTrigger className="w-full sm:w-[200px] h-10">
+              <SelectValue placeholder={t("loan.filterStatus")} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t("loan.allLoans")}</SelectItem>
+              <SelectItem value="pending">{t("loan.status.pending")}</SelectItem>
+              <SelectItem value="partial">{t("loan.status.partial")}</SelectItem>
+              <SelectItem value="paid">{t("loan.status.paid")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+    </CardHeader>
+    <CardContent>
+      {filteredLoans.length === 0 ? (
+        <div className="text-center py-12">
+          <HandCoins className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+          <p className="text-muted-foreground">
+            {loanSearchQuery ? "Qidiruv bo'yicha natija topilmadi" : t("loan.noLoans")}
+          </p>
+        </div>
+      ) : (
+        <>
+          {renderLoansTable()}
+
+          {/* Pagination */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-6 pt-4 border-t">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-600">Sahifada:</span>
+              <Select
+                value={loansPerPage.toString()}
+                onValueChange={(value) => {
+                  setLoansPerPage(Number(value))
+                  setLoansPage(1)
+                }}
+              >
+                <SelectTrigger className="w-[100px] h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="10">10</SelectItem>
+                  <SelectItem value="20">20</SelectItem>
+                  <SelectItem value="50">50</SelectItem>
+                  <SelectItem value="100">100</SelectItem>
+                </SelectContent>
+              </Select>
+              <span className="text-sm text-gray-600">
+                {loansStartIndex + 1}-{Math.min(loansEndIndex, filteredLoans.length)} / {filteredLoans.length}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setLoansPage((p) => Math.max(1, p - 1))}
+                disabled={loansPage === 1}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="text-sm text-gray-600">
+                Sahifa {loansPage} / {loansTotalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setLoansPage((p) => Math.min(loansTotalPages, p + 1))}
+                disabled={loansPage === loansTotalPages}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </>
+      )}
+    </CardContent>
+  </Card>
+</TabsContent>
 
         <TabsContent value="history" className="space-y-4 lg:space-y-6">
+
           <Card className="border-0 shadow-lg">
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
@@ -3147,49 +3648,122 @@ const handleUpdateExchangeRate = () => {
             </CardHeader>
             <CardContent>
               {/* Sales Statistics Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                <Card className="bg-gradient-to-br from-blue-50 to-blue-100">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-blue-700 font-medium">Jami sotuvlar</p>
-                        <p className="text-2xl font-bold text-blue-900">{filteredSales.length}</p>
-                      </div>
-                      <div className="p-3 bg-blue-500 rounded-full">
-                        <Receipt className="h-6 w-6 text-white" />
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+ <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+   {/* 🔹 Jami Sotuvlar */}
+   <Card className="bg-gradient-to-br from-blue-50 to-blue-100 hover:shadow-lg transition-shadow duration-200">
+     <CardContent className="p-5">
+       <div className="flex items-center justify-between">
+         <div>
+           <p className="text-base text-blue-700 font-semibold mb-1">Jami sotuvlar</p>
+           <p className="text-4xl font-extrabold text-blue-900">{filteredSales.length}</p>
+         </div>
+         <div className="p-4 bg-blue-600 rounded-2xl shadow-md">
+           <Receipt className="h-8 w-8 text-white" />
+         </div>
+       </div>
+     </CardContent>
+   </Card>
 
-                <Card className="bg-gradient-to-br from-green-50 to-green-100">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-green-700 font-medium">Jami summa</p>
-                        <p className="text-2xl font-bold text-green-900">${filteredSales.reduce((acc, sale) => acc + sale.totalAmount, 0).toLocaleString()}</p>
-                      </div>
-                      <div className="p-3 bg-green-500 rounded-full">
-                        <DollarSign className="h-6 w-6 text-white" />
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+   {/* 🔹 Jami Summa */}
+   <Card className="bg-gradient-to-br from-green-50 to-green-100 hover:shadow-lg transition-shadow duration-200">
+     <CardContent className="p-6">
+       <div className="flex flex-col justify-between h-full">
+         <div className="flex items-center justify-between">
+           <div>
+             <p className="text-lg text-green-700 font-semibold mb-1">Jami summa</p>
+             <p className="text-3xl font-extrabold text-green-900">
+               ${filteredSales.reduce((acc, sale) => acc + sale.totalAmount, 0).toLocaleString()}
+             </p>
+             <p className="text-xl font-bold text-green-700 mb-2">
+               {(filteredSales.reduce((acc, sale) => acc + sale.totalAmount, 0) * exchangeRate).toLocaleString()} so'm
+             </p>
+           </div>
+           <div className="p-4 bg-green-600 rounded-2xl shadow-md">
+             <DollarSign className="h-8 w-8 text-white" />
+           </div>
+         </div>
 
-                <Card className="bg-gradient-to-br from-purple-50 to-purple-100">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-purple-700 font-medium">Sotilgan mahsulotlar</p>
-                        <p className="text-2xl font-bold text-purple-900">{totalItemsSold}</p>
-                      </div>
-                      <div className="p-3 bg-purple-500 rounded-full">
-                        <Package className="h-6 w-6 text-white" />
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
+         {/* 🔸 Foyda va foizli narxlar */}
+         {filteredSales.some(sale => sale.items.some(item => Number(item.profitPercent) > 0)) && (
+           <div className="mt-4 border-t border-green-300 pt-3 space-y-1">
+             <p className="text-base text-blue-800 font-semibold">
+               Foizli jami narx: $
+               {filteredSales
+                 .reduce((sum, sale) =>
+                   sum +
+                   sale.items.reduce((itemSum, item) => {
+                     const profitPercent = Number(item.profitPercent) || 0
+                     const base = Number(item.price)
+                     const profit = profitPercent > 0 ? base + (base * profitPercent) / 100 : base
+                     return itemSum + profit * item.quantity
+                   }, 0),
+                 0)
+                 .toLocaleString()}
+             </p>
+
+             <p className="text-base text-blue-800 font-semibold">
+               {(filteredSales
+                 .reduce((sum, sale) =>
+                   sum +
+                   sale.items.reduce((itemSum, item) => {
+                     const profitPercent = Number(item.profitPercent) || 0
+                     const base = Number(item.price)
+                     const profit = profitPercent > 0 ? base + (base * profitPercent) / 100 : base
+                     return itemSum + profit * item.quantity
+                   }, 0),
+                 0) * exchangeRate
+               ).toLocaleString()} so'm
+             </p>
+
+             <p className="text-base text-green-800 font-semibold">
+               Foyda (faqat foizdan): $
+               {filteredSales
+                 .reduce((sum, sale) =>
+                   sum +
+                   sale.items.reduce((itemSum, item) => {
+                     const p = Number(item.profitPercent) || 0
+                     const base = Number(item.price)
+                     return itemSum + (p > 0 ? (base * p / 100) * item.quantity : 0)
+                   }, 0),
+                 0)
+                 .toLocaleString()}
+             </p>
+
+             <p className="text-base text-green-800 font-semibold">
+               {(
+                 filteredSales
+                   .reduce((sum, sale) =>
+                     sum +
+                     sale.items.reduce((itemSum, item) => {
+                       const p = Number(item.profitPercent) || 0
+                       const base = Number(item.price)
+                       return itemSum + (p > 0 ? (base * p / 100) * item.quantity : 0)
+                     }, 0),
+                   0) * exchangeRate
+               ).toLocaleString()} so'm
+             </p>
+           </div>
+         )}
+       </div>
+     </CardContent>
+   </Card>
+
+   {/* 🔹 Sotilgan mahsulotlar */}
+   <Card className="bg-gradient-to-br from-purple-50 to-purple-100 hover:shadow-lg transition-shadow duration-200">
+     <CardContent className="p-5">
+       <div className="flex items-center justify-between">
+         <div>
+           <p className="text-base text-purple-700 font-semibold mb-1">Sotilgan mahsulotlar</p>
+           <p className="text-4xl font-extrabold text-purple-900">{totalItemsSold}</p>
+         </div>
+         <div className="p-4 bg-purple-600 rounded-2xl shadow-md">
+           <Package className="h-8 w-8 text-white" />
+         </div>
+       </div>
+     </CardContent>
+   </Card>
+ </div>
+
 
               {/* Sales History Table */}
               <div className="border rounded-lg overflow-hidden">
@@ -3246,47 +3820,75 @@ const handleUpdateExchangeRate = () => {
                                   </div>
                                 </div>
                               </td>
-                              <td className="py-3 px-4">
-                                <div className="space-y-1">
-                                  {transaction.items.slice(0, 2).map((item, idx) => (
-                                    <div key={idx} className="text-sm">
-                                      <span className="font-medium text-gray-900">{item.GMName}</span>
-                                      <span className="text-gray-500 ml-2">
-                                        ({item.quantity} x ${item.price.toFixed(2)})
-                                      </span>
-                                    </div>
-                                  ))}
-                                  {transaction.items.length > 2 && (
-                                    <div className="text-sm text-gray-500">
-                                      +{transaction.items.length - 2} ta mahsulot
-                                    </div>
-                                  )}
-                                </div>
-                              </td>
-                              <td className="py-3 px-4 text-right">
-                                <span className="font-bold text-green-600 text-lg">
-                                  ${transaction.totalAmount.toLocaleString()}
-                                </span>
-                              </td>
+                          <td className="py-3 px-4">
+<div className="space-y-1">
+  {transaction.items.slice(0, 2).map((item, idx) => {
+    const profitPercent = Number(item.profitPercent) || 0
+    const basePrice = Number(item.price)
+    const profitPrice = profitPercent > 0
+      ? basePrice + (basePrice * profitPercent / 100)
+      : basePrice
+    return (
+      <div key={idx} className="text-sm">
+        <span className="font-medium text-gray-900">{item.productName}</span>
+        <span className="text-gray-500 ml-2">
+          ({item.quantity} x ${basePrice.toLocaleString()})
+        </span>
+        {profitPercent > 0 && (
+          <span className="block text-xs text-blue-700 ml-6">
+            Foizli narx: ${profitPrice.toLocaleString()} ({profitPercent}%)
+          </span>
+        )}
+      </div>
+    )
+  })}
+  {transaction.items.length > 2 && (
+    <div className="text-sm text-gray-500">
+      +{transaction.items.length - 2} ta mahsulot
+    </div>
+  )}
+</div>
+</td>
+<td className="py-3 px-4 text-right">
+  <span className="font-bold text-green-600 text-lg">
+    ${transaction.totalAmount.toLocaleString()}
+  </span>
+  {/* Jami foizli narx (agar kamida 1ta mahsulotda profitPercent > 0 bo‘lsa) */}
+  {transaction.items.some((item: any) => Number(item.profitPercent) > 0) && (
+    <span className="block text-xs text-blue-700 mt-1">
+      Foizli jami narx: $
+      {transaction.items
+        .reduce((sum: number, item: any) => {
+          const profitPercent = Number(item.profitPercent) || 0
+          const basePrice = Number(item.price)
+          const profitPrice = profitPercent > 0
+            ? basePrice + (basePrice * profitPercent / 100)
+            : basePrice
+          return sum + profitPrice * item.quantity
+        }, 0)
+        .toLocaleString(undefined, { maximumFractionDigits: 0 })}
+    </span>
+  )}
+</td>
                               <td className="py-3 px-4 text-center">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    setReceiptData({
-                                      receiptNumber: transaction.receiptNumber,
-                                      items: transaction.items,
-                                      totalAmount: transaction.totalAmount,
-                                      date: saleDate,
-                                    })
-                                    setShowReceipt(true)
-                                  }}
-                                  className="text-[#0099b5] hover:bg-[#0099b5]/10"
-                                >
-                                  <Printer className="h-4 w-4 mr-1" />
-                                  Chek
-                                </Button>
+<Button
+  variant="outline"
+  size="sm"
+  onClick={e => {
+    e.stopPropagation()
+    setReceiptData({
+      receiptNumber: transaction.receiptNumber,
+      items: transaction.items,
+      totalAmount: transaction.totalAmount,
+      date: saleDate,
+    })
+    setTimeout(() => window.print(), 100)
+  }}
+  className="text-[#0099b5] hover:bg-[#0099b5]/10"
+>
+  <Printer className="h-4 w-4 mr-1" />
+  Chek
+</Button>
                               </td>
                             </tr>
                           )
@@ -3368,43 +3970,41 @@ const handleUpdateExchangeRate = () => {
               )}
             </CardContent>
           </Card>
-        </TabsContent>
 
+        </TabsContent>
       </Tabs>
 
       <Dialog open={showExchangeRateModal} onOpenChange={setShowExchangeRateModal}>
-  <DialogContent className="max-w-xs">
-    <DialogHeader>
-      <DialogTitle>Valyuta kursini o'zgartirish</DialogTitle>
-      <DialogDescription>1$ = {exchangeRate.toLocaleString()} so'm</DialogDescription>
-    </DialogHeader>
-    <div className="space-y-4">
-      <Label htmlFor="exchange-rate">Yangi kurs (so'm):</Label>
-      <Input
-        id="exchange-rate"
-        type="number"
-        min="1"
-        value={tempExchangeRate}
-        onChange={(e) => setTempExchangeRate(e.target.value)}
-      />
-    </div>
-    <DialogFooter>
-      <Button variant="outline" onClick={() => setShowExchangeRateModal(false)}>
-        Bekor qilish
-      </Button>
-      <Button onClick={handleUpdateExchangeRate}>
-        Saqlash
-      </Button>
-    </DialogFooter>
-  </DialogContent>
-</Dialog>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle>Valyuta kursini o'zgartirish</DialogTitle>
+            <DialogDescription>1$ = {exchangeRate.toLocaleString()} so'm</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <Label htmlFor="exchange-rate">Yangi kurs (so'm):</Label>
+            <Input
+              id="exchange-rate"
+              type="number"
+              min="1"
+              value={tempExchangeRate}
+              onChange={(e) => setTempExchangeRate(e.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowExchangeRateModal(false)}>
+              Bekor qilish
+            </Button>
+            <Button onClick={handleUpdateExchangeRate}>Saqlash</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={isDetailsModalOpen} onOpenChange={setIsDetailsModalOpen}>
         <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Package className="h-5 w-5 text-[#0099b5]" />
-              {t("modal.GMDetails")}
+              {t("modal.productDetails")}
             </DialogTitle>
             <DialogDescription>
               {viewingGM?.nomi} - {viewingGM?.kodi}
@@ -3437,6 +4037,10 @@ const handleUpdateExchangeRate = () => {
                       <span className="font-medium">{viewingGM.category || "-"}</span>
                     </div>
                     <div className="flex justify-between">
+                      <span className="text-gray-600">Qayerdan olib kelingan:</span>
+                      <span className="font-medium">{viewingGM.source || "-"}</span>
+                    </div>
+                    <div className="flex justify-between">
                       <span className="text-gray-600">{t("warehouse.status")}:</span>
                       <Badge
                         className={cn(
@@ -3460,6 +4064,31 @@ const handleUpdateExchangeRate = () => {
                       <span className="text-gray-600">{t("narxi")}:</span>
                       <span className="font-bold text-green-600">{viewingGM.narxi}</span>
                     </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Ustama foiz (%):</span>
+                      <span className="font-medium">
+                        {viewingGM.profitPercent ? `${viewingGM.profitPercent}%` : "-"}
+                      </span>
+                    </div>
+                    {viewingGM.narxi &&
+                      viewingGM.profitPercent &&
+                      !isNaN(Number(viewingGM.narxi.toString().replace(/,/g, ""))) &&
+                      !isNaN(Number(viewingGM.profitPercent)) &&
+                      Number(viewingGM.profitPercent) > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Foizli narx:</span>
+                          <span className="font-bold text-blue-700">
+                            $
+                            {(
+                              Number(viewingGM.narxi.toString().replace(/,/g, "")) +
+                              (Number(viewingGM.narxi.toString().replace(/,/g, "")) *
+                                Number(viewingGM.profitPercent)) /
+                                100
+                            ).toLocaleString(undefined, { maximumFractionDigits: 0 })}{" "}
+                            ({viewingGM.profitPercent}%)
+                          </span>
+                        </div>
+                      )}
                     <div className="flex justify-between">
                       <span className="text-gray-600">{t("warehouse.cost")}:</span>
                       <span className="font-medium">{viewingGM.cost || "-"}</span>
@@ -3629,7 +4258,7 @@ const handleUpdateExchangeRate = () => {
           <div className="space-y-4">
             <div className="p-4 bg-gray-50 rounded-lg">
               <div className="flex justify-between items-center mb-2">
-                <span className="text-sm text-gray-600">{t("GMName")}:</span>
+                <span className="text-sm text-gray-600">{t("productName")}:</span>
                 <span className="font-medium">{stockGM?.nomi}</span>
               </div>
               <div className="flex justify-between items-center mb-2">
@@ -3704,18 +4333,18 @@ const handleUpdateExchangeRate = () => {
             <DialogDescription>GMs that need restocking ({lowStockGMs.length} items)</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            {lowStockGMs.map((GM) => (
-              <div key={GM.id} className="p-3 border border-orange-200 rounded-lg bg-orange-50">
+            {lowStockGMs.map((product) => (
+              <div key={product.id} className="p-3 border border-orange-200 rounded-lg bg-orange-50">
                 <div className="flex justify-between items-center">
                   <div>
-                    <h4 className="font-medium text-gray-900">{GM.nomi}</h4>
+                    <h4 className="font-medium text-gray-900">{product.nomi}</h4>
                     <p className="text-sm text-gray-600">
-                      {GM.kodi} - {GM.kompaniya}
+                      {product.kodi} - {product.kompaniya}
                     </p>
                   </div>
                   <div className="text-right">
-                    <Badge className="bg-red-100 text-red-800 border-red-200 mb-1">Stock: {GM.stock || 0}</Badge>
-                    <p className="text-xs text-gray-500">Min: {GM.minStock || 10}</p>
+                    <Badge className="bg-red-100 text-red-800 border-red-200 mb-1">Stock: {product.stock || 0}</Badge>
+                    <p className="text-xs text-gray-500">Min: {product.minStock || 10}</p>
                   </div>
                 </div>
                 <div className="mt-2 flex gap-2">
@@ -3724,11 +4353,11 @@ const handleUpdateExchangeRate = () => {
                     size="sm"
                     onClick={() => {
                       setIsLowStockModalOpen(false)
-                      handleStockAction(GM, "add")
+                      handleStockAction(product, "add")
                     }}
                     className="border-green-200 text-green-700 hover:bg-green-50"
                   >
-                    <PackagePlus className="h-4 w-1 mr-1" />
+                    <PackagePlus className="h-4 w-4 mr-1" />
                     Restock
                   </Button>
                   <Button
@@ -3736,7 +4365,7 @@ const handleUpdateExchangeRate = () => {
                     size="sm"
                     onClick={() => {
                       setIsLowStockModalOpen(false)
-                      handleViewDetails(GM)
+                      handleViewDetails(product)
                     }}
                     className="border-blue-200 text-blue-700 hover:bg-blue-50"
                   >
@@ -3756,21 +4385,26 @@ const handleUpdateExchangeRate = () => {
       </Dialog>
 
       <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
-        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-none">
           <DialogHeader>
             <DialogTitle>{t("editGM")}</DialogTitle>
             <DialogDescription>{t("editGMDescription")}</DialogDescription>
           </DialogHeader>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* 🔹 Kodi */}
             <div>
               <Label htmlFor="edit-kodi">{t("kodi")} *</Label>
               <Input
                 id="edit-kodi"
+                required
                 value={formData.kodi}
                 onChange={(e) => setFormData({ ...formData, kodi: e.target.value })}
                 className="border-[#0099b5]/20 focus:border-[#0099b5]"
               />
             </div>
+
+            {/* 🔹 Model */}
             <div>
               <Label htmlFor="edit-model">{t("model")}</Label>
               <Input
@@ -3780,32 +4414,49 @@ const handleUpdateExchangeRate = () => {
                 className="border-[#0099b5]/20 focus:border-[#0099b5]"
               />
             </div>
+
+            {/* 🔹 Nomi */}
             <div>
               <Label htmlFor="edit-nomi">{t("nomi")} *</Label>
               <Input
                 id="edit-nomi"
+                required
                 value={formData.nomi}
                 onChange={(e) => setFormData({ ...formData, nomi: e.target.value })}
                 className="border-[#0099b5]/20 focus:border-[#0099b5]"
               />
             </div>
+
+            {/* 🔹 Kompaniya */}
             <div>
               <Label htmlFor="edit-kompaniya">{t("kompaniya")} *</Label>
               <Input
                 id="edit-kompaniya"
+                required
                 value={formData.kompaniya}
                 onChange={(e) => setFormData({ ...formData, kompaniya: e.target.value })}
                 className="border-[#0099b5]/20 focus:border-[#0099b5]"
               />
             </div>
             <div>
-              <Label htmlFor="edit-paymentType">To'lov turi *</Label>
+              <Label htmlFor="edit-source">Qayerdan olib kelindi</Label>
+              <Input
+                id="edit-source"
+                value={formData.source}
+                onChange={(e) => setFormData({ ...formData, source: e.target.value })}
+                placeholder="Manba (masalan: Toshkent, Koreya, ...)"
+                className="border-[#0099b5]/20 focus:border-[#0099b5]"
+              />
+            </div>
+            {/* 🔹 To‘lov turi */}
+            <div>
+              <Label htmlFor="edit-paymentType">{t("to'lovTuri")} *</Label>
               <Select
                 value={formData.paymentType}
                 onValueChange={(value: "naqd" | "qarz") => setFormData({ ...formData, paymentType: value })}
               >
-                <SelectTrigger className="border-[#0099b5]/20">
-                  <SelectValue />
+                <SelectTrigger className="border-[#0099b5]/20 focus:border-[#0099b5]">
+                  <SelectValue placeholder={t("selectPayment")} />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="naqd">Naqd (Pul)</SelectItem>
@@ -3813,137 +4464,8 @@ const handleUpdateExchangeRate = () => {
                 </SelectContent>
               </Select>
             </div>
-            <div>
-              <Label htmlFor="edit-narxi">{t("narxi")} *</Label>
-              <Input
-                id="edit-narxi"
-                value={formData.narxi}
-                onChange={(e) => setFormData({ ...formData, narxi: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-cost">{t("warehouse.cost")}</Label>
-              <Input
-                id="edit-cost"
-                value={formData.cost}
-                onChange={(e) => setFormData({ ...formData, cost: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-stock">{t("warehouse.stock")}</Label>
-              <Input
-                id="edit-stock"
-                type="number"
-                value={formData.stock}
-                onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-minStock">{t("warehouse.minStock")}</Label>
-              <Input
-                id="edit-minStock"
-                type="number"
-                value={formData.minStock}
-                onChange={(e) => setFormData({ ...formData, minStock: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-maxStock">{t("warehouse.maxStock")}</Label>
-              <Input
-                id="edit-maxStock"
-                type="number"
-                value={formData.maxStock}
-                onChange={(e) => setFormData({ ...formData, maxStock: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-location">{t("warehouse.location")}</Label>
-              <Input
-                id="edit-location"
-                value={formData.location}
-                onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-category">{t("warehouse.category")}</Label>
-              <Input
-                id="edit-category"
-                value={formData.category}
-                onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-supplier">{t("warehouse.supplier")}</Label>
-              <Input
-                id="edit-supplier"
-                value={formData.supplier}
-                onChange={(e) => setFormData({ ...formData, supplier: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-barcode">{t("warehouse.barcode")}</Label>
-              <Input
-                id="edit-barcode"
-                value={formData.barcode}
-                onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-weight">{t("warehouse.weight")}</Label>
-              <Input
-                id="edit-weight"
-                type="number"
-                step="0.1"
-                value={formData.weight}
-                onChange={(e) => setFormData({ ...formData, weight: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-dimensions">{t("warehouse.dimensions")}</Label>
-              <Input
-                id="edit-dimensions"
-                value={formData.dimensions}
-                onChange={(e) => setFormData({ ...formData, dimensions: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-status">{t("warehouse.status")}</Label>
-              <Select
-                value={formData.status}
-                onValueChange={(value: any) => setFormData({ ...formData, status: value })}
-              >
-                <SelectTrigger className="border-[#0099b5]/20">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="active">{t("status.active")}</SelectItem>
-                  <SelectItem value="inactive">{t("status.inactive")}</SelectItem>
-                  <SelectItem value="discontinued">{t("status.discontinued")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="md:col-span-2">
-              <Label htmlFor="edit-description">{t("warehouse.description")}</Label>
-              <Textarea
-                id="edit-description"
-                value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                className="border-[#0099b5]/20 focus:border-[#0099b5]"
-                rows={3}
-              />
-            </div>
-            {/* Added conditional inputs for debt quantity and price when editing and payment type is qarz */}
+
+            {/* 🔹 Qarz bo‘lsa, qo‘shimcha inputlar */}
             {formData.paymentType === "qarz" && (
               <>
                 <div>
@@ -3958,26 +4480,202 @@ const handleUpdateExchangeRate = () => {
                     className="border-orange-200 focus:border-orange-400"
                   />
                 </div>
+
                 <div>
-                  <Label htmlFor="edit-debtPrice">Qarz narxi (sum) *</Label>
+                  <Label htmlFor="edit-debtPrice">Qarz narxi (so‘m) *</Label>
                   <Input
                     id="edit-debtPrice"
                     type="number"
                     min="0"
                     value={formData.debtPrice}
                     onChange={(e) => setFormData({ ...formData, debtPrice: e.target.value })}
-                    placeholder="Qancha sum qarz"
+                    placeholder="Qancha so‘m qarz"
                     className="border-orange-200 focus:border-orange-400"
                   />
                 </div>
               </>
             )}
+
+            {/* 🔹 Narxi */}
+            <div>
+              <Label htmlFor="edit-narxi">{t("narxi")} *</Label>
+              <Input
+                id="edit-narxi"
+                required
+                value={formData.narxi}
+                onChange={(e) => setFormData({ ...formData, narxi: e.target.value })}
+                className="border-[#0099b5]/20 focus:border-[#0099b5]"
+              />
+            </div>
+            <div>
+              <Label htmlFor="edit-profitPercent">Ustama foiz (%)</Label>
+              <Input
+                id="edit-profitPercent"
+                type="number"
+                min="0"
+                max="100"
+                value={formData.profitPercent}
+                onChange={(e) => setFormData({ ...formData, profitPercent: e.target.value })}
+                placeholder="Masalan: 15"
+                className="border-[#0099b5]/20 focus:border-[#0099b5]"
+              />
+              <span className="block mt-2 text-green-700 font-semibold">
+                {formData.narxi && formData.profitPercent
+                  ? `Foizli narx: $${calculatedProfitPrice.toFixed(2)}`
+                  : "Foiz kiriting"}
+              </span>
+            </div>
+            {/* 🔹 Tan narxi */}
+            <div>
+              <Label htmlFor="edit-cost">{t("warehouse.cost")}</Label>
+              <Input
+                id="edit-cost"
+                value={formData.cost}
+                onChange={(e) => setFormData({ ...formData, cost: e.target.value })}
+                className="border-[#0099b5]/20 focus:border-[#0099b5]"
+              />
+            </div>
+
+            {/* 🔹 Qoldiq miqdorlar */}
+            <div>
+              <Label htmlFor="edit-stock">{t("warehouse.stock")}</Label>
+              <Input
+                id="edit-stock"
+                type="number"
+                min="0"
+                value={formData.stock}
+                onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
+                className="border-[#0099b5]/20 focus:border-[#0099b5]"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="edit-minStock">{t("warehouse.minStock")}</Label>
+              <Input
+                id="edit-minStock"
+                type="number"
+                min="0"
+                value={formData.minStock}
+                onChange={(e) => setFormData({ ...formData, minStock: e.target.value })}
+                className="border-[#0099b5]/20 focus:border-[#0099b5]"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="edit-maxStock">{t("warehouse.maxStock")}</Label>
+              <Input
+                id="edit-maxStock"
+                type="number"
+                min="0"
+                value={formData.maxStock}
+                onChange={(e) => setFormData({ ...formData, maxStock: e.target.value })}
+                className="border-[#0099b5]/20 focus:border-[#0099b5]"
+              />
+            </div>
+
+            {/* 🔹 Joylashuv, kategoriya, ta’minotchi */}
+            <div>
+              <Label htmlFor="edit-location">{t("warehouse.location")}</Label>
+              <Input
+                id="edit-location"
+                value={formData.location}
+                onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                className="border-[#0099b5]/20 focus:border-[#0099b5]"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="edit-category">{t("warehouse.category")}</Label>
+              <Input
+                id="edit-category"
+                value={formData.category}
+                onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                className="border-[#0099b5]/20 focus:border-[#0099b5]"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="edit-supplier">{t("warehouse.supplier")}</Label>
+              <Input
+                id="edit-supplier"
+                value={formData.supplier}
+                onChange={(e) => setFormData({ ...formData, supplier: e.target.value })}
+                className="border-[#0099b5]/20 focus:border-[#0099b5]"
+              />
+            </div>
+
+            {/* 🔹 Qo‘shimcha ma’lumotlar */}
+            <div>
+              <Label htmlFor="edit-barcode">{t("warehouse.barcode")}</Label>
+              <Input
+                id="edit-barcode"
+                value={formData.barcode}
+                onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
+                className="border-[#0099b5]/20 focus:border-[#0099b5]"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="edit-weight">{t("warehouse.weight")}</Label>
+              <Input
+                id="edit-weight"
+                type="number"
+                step="0.1"
+                min="0"
+                value={formData.weight}
+                onChange={(e) => setFormData({ ...formData, weight: e.target.value })}
+                className="border-[#0099b5]/20 focus:border-[#0099b5]"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="edit-dimensions">{t("warehouse.dimensions")}</Label>
+              <Input
+                id="edit-dimensions"
+                value={formData.dimensions}
+                onChange={(e) => setFormData({ ...formData, dimensions: e.target.value })}
+                className="border-[#0099b5]/20 focus:border-[#0099b5]"
+              />
+            </div>
+
+            {/* 🔹 Status */}
+            <div>
+              <Label htmlFor="edit-status">{t("warehouse.status")}</Label>
+              <Select value={formData.status} onValueChange={(value) => setFormData({ ...formData, status: value })}>
+                <SelectTrigger className="border-[#0099b5]/20 focus:border-[#0099b5]">
+                  <SelectValue placeholder={t("selectStatus")} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">{t("status.active")}</SelectItem>
+                  <SelectItem value="inactive">{t("status.inactive")}</SelectItem>
+                  <SelectItem value="discontinued">{t("status.discontinued")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* 🔹 Izoh */}
+            <div className="md:col-span-2">
+              <Label htmlFor="edit-description">{t("warehouse.description")}</Label>
+              <Textarea
+                id="edit-description"
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                className="border-[#0099b5]/20 focus:border-[#0099b5]"
+                rows={3}
+              />
+            </div>
           </div>
-          <DialogFooter>
+
+          {/* 🔹 Pastki tugmalar */}
+          <DialogFooter className="mt-4">
             <Button variant="outline" onClick={() => setIsEditModalOpen(false)} disabled={isSubmitting}>
               {t("cancel")}
             </Button>
-            <Button onClick={handleUpdate} className="bg-[#0099b5] hover:bg-[#0099b5]/90" disabled={isSubmitting}>
+            <Button
+              onClick={handleUpdate}
+              className="bg-[#0099b5] hover:bg-[#0099b5]/90 text-white"
+              disabled={isSubmitting}
+            >
               {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
               {t("update")}
             </Button>
@@ -3996,7 +4694,7 @@ const handleUpdateExchangeRate = () => {
           <div className="space-y-4">
             <div className="p-4 bg-gray-50 rounded-lg">
               <div className="flex justify-between items-center mb-2">
-                <span className="text-sm text-gray-600">{t("GMName")}:</span>
+                <span className="text-sm text-gray-600">{t("productName")}:</span>
                 <span className="font-medium">{sellingGM?.nomi}</span>
               </div>
               <div className="flex justify-between items-center mb-2">
@@ -4033,8 +4731,7 @@ const handleUpdateExchangeRate = () => {
               {t("cancel")}
             </Button>
             <Button onClick={confirmSell} className="bg-green-600 hover:bg-green-700" disabled={isSubmitting}>
-
-                <ShoppingCart className="h-4 w-4 mr-2" />
+              <ShoppingCart className="h-4 w-4 mr-2" />
               {t("confirmSale")}
             </Button>
           </DialogFooter>
@@ -4049,7 +4746,7 @@ const handleUpdateExchangeRate = () => {
           </DialogHeader>
           <div className="p-4 bg-red-50 rounded-lg border border-red-200">
             <div className="flex justify-between items-center mb-2">
-              <span className="text-sm text-red-700">{t("GMName")}:</span>
+              <span className="text-sm text-red-700">{t("productName")}:</span>
               <span className="font-medium text-red-800">{deletingGM?.nomi}</span>
             </div>
             <div className="flex justify-between items-center mb-2">
@@ -4082,7 +4779,7 @@ const handleUpdateExchangeRate = () => {
           <div className="p-4 bg-red-50 rounded-lg border border-red-200">
             <div className="flex items-center justify-center">
               <span className="text-lg font-semibold text-red-800">
-                {data.length} {t("GMs")}
+                {data.length} {t("products")}
               </span>
             </div>
           </div>
@@ -4102,7 +4799,7 @@ const handleUpdateExchangeRate = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Add modal for creating a new GM */}
+      {/* Add modal for creating a new product */}
       <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
         <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -4143,6 +4840,16 @@ const handleUpdateExchangeRate = () => {
                 id="kompaniya"
                 value={formData.kompaniya}
                 onChange={(e) => setFormData({ ...formData, kompaniya: e.target.value })}
+                className="border-[#0099b5]/20 focus:border-[#0099b5]"
+              />
+            </div>
+            <div>
+              <Label htmlFor="source">Qayerdan olib kelindi</Label>
+              <Input
+                id="source"
+                value={formData.source}
+                onChange={(e) => setFormData({ ...formData, source: e.target.value })}
+                placeholder="Manba (masalan: Toshkent, Koreya, ...)"
                 className="border-[#0099b5]/20 focus:border-[#0099b5]"
               />
             </div>
@@ -4199,6 +4906,24 @@ const handleUpdateExchangeRate = () => {
                 onChange={(e) => setFormData({ ...formData, narxi: e.target.value })}
                 className="border-[#0099b5]/20 focus:border-[#0099b5]"
               />
+            </div>
+            <div>
+              <Label htmlFor="profitPercent">Ustama foiz (%)</Label>
+              <Input
+                id="profitPercent"
+                type="number"
+                min="0"
+                max="100"
+                value={formData.profitPercent}
+                onChange={(e) => setFormData({ ...formData, profitPercent: e.target.value })}
+                placeholder="Masalan: 15"
+                className="border-[#0099b5]/20 focus:border-[#0099b5]"
+              />
+              <span className="block mt-2 text-green-700 font-semibold">
+                {formData.narxi && formData.profitPercent
+                  ? `Foizli narx: $${calculatedProfitPrice.toFixed(2)}`
+                  : "Foiz kiriting"}
+              </span>
             </div>
             <div>
               <Label htmlFor="cost">{t("warehouse.cost")}</Label>
@@ -4297,10 +5022,7 @@ const handleUpdateExchangeRate = () => {
             </div>
             <div>
               <Label htmlFor="status">{t("warehouse.status")}</Label>
-              <Select
-                value={formData.status}
-                onValueChange={(value: any) => setFormData({ ...formData, status: value })}
-              >
+              <Select value={formData.status} onValueChange={(value) => setFormData({ ...formData, status: value })}>
                 <SelectTrigger className="border-[#0099b5]/20">
                   <SelectValue />
                 </SelectTrigger>
@@ -4449,18 +5171,70 @@ const handleUpdateExchangeRate = () => {
                 </CardContent>
               </Card>
             )}
+{sellAsLoan && (
+  <div className="p-4 bg-blue-50 rounded-lg mt-4 space-y-2">
+    <div className="flex justify-between">
+      <span className="font-semibold text-gray-700">Umumiy narx:</span>
+      <span className="font-bold text-green-900">
+        $
+        {Array.from(selectedGMs)
+          .map((id) => data.find((p) => p.id === id))
+          .filter((p): p is GM => p !== undefined)
+          .reduce((sum, product) => {
+            const price = Number.parseFloat(product.narxi.replace(/[^\d.]/g, "")) || 0
+            const quantity = bulkSellQuantities[product.id!] || 1
+            return sum + price * quantity
+          }, 0)
+          .toLocaleString()}
+      </span>
+    </div>
+    <div className="flex justify-between">
+      <span className="font-semibold text-gray-700">So'mda:</span>
+      <span className="font-bold text-green-900">
+        {(
+          Array.from(selectedGMs)
+            .map((id) => data.find((p) => p.id === id))
+            .filter((p): p is GM => p !== undefined)
+            .reduce((sum, product) => {
+              const price = Number.parseFloat(product.narxi.replace(/[^\d.]/g, "")) || 0
+              const quantity = bulkSellQuantities[product.id!] || 1
+              return sum + price * quantity
+            }, 0) * exchangeRate
+        ).toLocaleString()} so'm
+      </span>
+    </div>
+    {/* Foizli narx va so‘mda */}
 
+    <div className="flex justify-between">
+      <span className="font-semibold text-blue-700">So'mda:</span>
+      <span className="font-bold text-blue-900">
+        {(
+          Array.from(selectedGMs)
+            .map((id) => data.find((p) => p.id === id))
+            .filter((p): p is GM => p !== undefined)
+            .reduce((sum, product) => {
+              const price = Number.parseFloat(product.narxi.replace(/[^\d.]/g, "")) || 0
+              const percent = Number(product.profitPercent) || 0
+              const quantity = bulkSellQuantities[product.id!] || 1
+              const profitPrice = percent > 0 ? price + (price * percent) / 100 : price
+              return sum + profitPrice * quantity
+            }, 0) * exchangeRate
+        ).toLocaleString()} so'm
+      </span>
+    </div>
+  </div>
+)}
             {/* GMs list */}
             <div className="space-y-2">
               {Array.from(selectedGMs)
                 .map((id) => data.find((p) => p.id === id))
                 .filter((p): p is GM => p !== undefined)
-                .map((GM) => (
-                  <div key={GM.id} className="flex items-center gap-4 p-3 border rounded-lg">
+                .map((product) => (
+                  <div key={product.id} className="flex items-center gap-4 p-3 border rounded-lg">
                     <div className="flex-1">
-                      <p className="font-medium">{GM.nomi}</p>
+                      <p className="font-medium">{product.nomi}</p>
                       <p className="text-sm text-muted-foreground">
-                        {GM.kodi} • {GM.kompaniya}
+                        {product.kodi} • {product.kompaniya}
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
@@ -4468,12 +5242,12 @@ const handleUpdateExchangeRate = () => {
                       <Input
                         type="number"
                         min="1"
-                        max={GM.stock || 0}
-                        value={bulkSellQuantities[GM.id!] || 1}
+                        max={product.stock || 0}
+                        value={bulkSellQuantities[product.id!] || 1}
                         onChange={(e) =>
                           setBulkSellQuantities({
                             ...bulkSellQuantities,
-                            [GM.id!]: Number.parseInt(e.target.value) || 1,
+                            [product.id!]: Number.parseInt(e.target.value) || 1,
                           })
                         }
                         className="w-20"
@@ -4483,8 +5257,8 @@ const handleUpdateExchangeRate = () => {
                       <p className="font-semibold">
                         $
                         {(
-                          (Number.parseFloat(GM.narxi.replace(/[^\d.]/g, "")) || 0) *
-                          (bulkSellQuantities[GM.id!] || 1)
+                          (Number.parseFloat(product.narxi.replace(/[^\d.]/g, "")) || 0) *
+                          (bulkSellQuantities[product.id!] || 1)
                         ).toLocaleString()}
                       </p>
                     </div>
@@ -4492,22 +5266,6 @@ const handleUpdateExchangeRate = () => {
                 ))}
             </div>
 
-            {/* Total */}
-            <div className="flex justify-between items-center p-4 bg-primary/10 rounded-lg">
-              <span className="font-semibold text-lg">{t("totalAmount")}:</span>
-              <span className="font-bold text-2xl">
-                $
-                {Array.from(selectedGMs)
-                  .map((id) => data.find((p) => p.id === id))
-                  .filter((p): p is GM => p !== undefined)
-                  .reduce((sum, GM) => {
-                    const price = Number.parseFloat(GM.narxi.replace(/[^\d.]/g, "")) || 0
-                    const quantity = bulkSellQuantities[GM.id!] || 1
-                    return sum + price * quantity
-                  }, 0)
-                  .toLocaleString()}
-              </span>
-            </div>
           </div>
 
           <DialogFooter>
@@ -4515,90 +5273,191 @@ const handleUpdateExchangeRate = () => {
               {t("cancel")}
             </Button>
             <Button onClick={handleBulkSell} disabled={isSubmitting}>
-                  <ShoppingCart className="mr-2 h-4 w-4" />
-                  {sellAsLoan ? t("loan.sellAsLoan") : t("confirmSale")}
+              <ShoppingCart className="mr-2 h-4 w-4" />
+              {sellAsLoan ? t("loan.sellAsLoan") : t("confirmSale")}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isLoanPaymentModalOpen} onOpenChange={setIsLoanPaymentModalOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("loan.addPayment")}</DialogTitle>
-            <DialogDescription>{selectedLoan?.customerName} uchun to'lov qo'shish</DialogDescription>
-          </DialogHeader>
+    <Dialog open={isLoanPaymentModalOpen} onOpenChange={setIsLoanPaymentModalOpen}>
+  <DialogContent>
+    <DialogHeader>
+      <DialogTitle>{t("loan.addPayment")}</DialogTitle>
+      <DialogDescription>{selectedLoan?.customerName} uchun to'lov qo'shish</DialogDescription>
+    </DialogHeader>
+{/* Foizli narx va foyda statistikasi */}
+{selectedLoan?.items && selectedLoan.items.length > 0 && (() => {
+  const totalProfitUSD = selectedLoan.items.reduce((sum, item) => {
+    const percent = Number(item.profitPercent) || 0
+    const price = Number(item.price)
+    const profitPrice = percent > 0 ? price + (price * percent) / 100 : price
+    return sum + profitPrice * item.quantity
+  }, 0)
+  const totalProfitUZS = totalProfitUSD * exchangeRate
+  const avgPercent = (() => {
+    const percents = selectedLoan.items
+      .filter((i: any) => Number(i.profitPercent) > 0)
+      .map((i: any) => Number(i.profitPercent))
+    return percents.length > 0
+      ? Math.round(percents.reduce((a, b) => a + b, 0) / percents.length)
+      : 0
+  })()
+  const profitOnly = selectedLoan.items.reduce((sum, item) => {
+    const p = Number(item.profitPercent) || 0
+    const base = Number(item.price)
+    return sum + (p > 0 ? (base * p / 100) * item.quantity : 0)
+  }, 0)
+  const profitOnlyUZS = profitOnly * exchangeRate
+  return (
+    <div className="mt-4 p-3 bg-blue-50 rounded-lg space-y-2">
+      <div className="flex justify-between">
+        <span className="font-semibold text-blue-700">Foizli narx:</span>
+        <span className="font-bold text-blue-900">
+          ${totalProfitUSD.toLocaleString()}
+          {avgPercent > 0 && (
+            <span className="text-xs text-blue-700 ml-1">({avgPercent}%)</span>
+          )}
+        </span>
+      </div>
+      <div className="flex justify-between">
+        <span className="font-semibold text-blue-700">So'mda:</span>
+        <span className="font-bold text-blue-900">
+          {totalProfitUZS.toLocaleString()} so'm
+        </span>
+      </div>
+      <div className="flex justify-between mt-2">
+        <span className="font-semibold text-green-700">Foyda (faqat foizdan):</span>
+        <span className="font-bold text-green-700">
+          ${profitOnly.toLocaleString()}
+        </span>
+      </div>
+      <div className="flex justify-between">
+        <span className="font-semibold text-green-700">So'mda:</span>
+        <span className="font-bold text-green-700">
+          {profitOnlyUZS.toLocaleString()} so'm
+        </span>
+      </div>
+    </div>
+  )
+})()}
+    {selectedLoan && (
+      <div className="mb-4 p-4 bg-blue-50 rounded-lg space-y-2">
+        <div className="flex justify-between">
+          <span className="text-xs text-muted-foreground">Umumiy summa:</span>
+          <span className="font-semibold text-blue-900">
+            ${selectedLoan.totalAmount.toLocaleString()}
+          </span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-xs text-muted-foreground">So'mda:</span>
+          <span className="font-semibold text-blue-900">
+            {(selectedLoan.totalAmount * exchangeRate).toLocaleString()} so'm
+          </span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-xs text-green-700">To'langan summa:</span>
+          <span className="font-semibold text-green-700">
+            ${(selectedLoan.amountPaid || 0).toLocaleString()}
+          </span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-xs text-green-700">So'mda:</span>
+          <span className="font-semibold text-green-700">
+            {((selectedLoan.amountPaid || 0) * exchangeRate).toLocaleString()} so'm
+          </span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-xs text-orange-700">Qolgan qarz:</span>
+          <span className="font-semibold text-orange-700">
+            ${(selectedLoan.amountRemaining || 0).toLocaleString()}
+          </span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-xs text-orange-700">So'mda:</span>
+          <span className="font-semibold text-orange-700">
+            {((selectedLoan.amountRemaining || 0) * exchangeRate).toLocaleString()} so'm
+          </span>
+        </div>
+      </div>
+    )}
 
-          <div className="space-y-4">
-            <div className="p-4 bg-muted rounded-lg space-y-2">
-              <div className="flex justify-between">
-                <span className="text-sm text-muted-foreground">{t("loan.totalAmount")}:</span>
-                <span className="font-semibold">${selectedLoan?.totalAmount.toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-muted-foreground">{t("loan.amountPaid")}:</span>
-                <span className="font-semibold text-green-600">
-                  ${(selectedLoan?.amountPaid || 0).toLocaleString()}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-muted-foreground">{t("loan.amountRemaining")}:</span>
-                <span className="font-semibold text-orange-600">
-                  ${(selectedLoan?.amountRemaining || 0).toLocaleString()}
-                </span>
-              </div>
-            </div>
+    <div className="space-y-4">
+      <div>
+        <Label htmlFor="paymentAmount">{t("loan.paymentAmount")} *</Label>
+          {/* Calculate totalProfitUSD for this scope */}
+          {selectedLoan?.items && (
+            (() => {
+              const totalProfitUSD = selectedLoan.items.reduce((sum, item) => {
+                const percent = Number(item.profitPercent) || 0
+                const price = Number(item.price)
+                const profitPrice = percent > 0 ? price + (price * percent) / 100 : price
+                return sum + profitPrice * item.quantity
+              }, 0)
+              return (
+                <Input
+                  id="paymentAmount"
+                  type="number"
+                  min="0"
+                  max={selectedLoan?.amountRemaining || 0}
+                  value={loanPaymentData.amount}
+                  onChange={(e) => setLoanPaymentData({ ...loanPaymentData, amount: e.target.value })}
+                  placeholder="0.00"
+                  className={
+                    Number(loanPaymentData.amount) > totalProfitUSD
+                      ? "border-red-500 focus:border-red-600 bg-red-50"
+                      : "border-gray-300 focus:border-[#0099b5]"
+                  }
+                />
+              )
+            })()
+          )}
+          {/* If selectedLoan?.items is not present, fallback to default input */}
+          {!selectedLoan?.items && (
+            <Input
+              id="paymentAmount"
+              type="number"
+              min="0"
+              max={selectedLoan?.amountRemaining || 0}
+              value={loanPaymentData.amount}
+              onChange={(e) => setLoanPaymentData({ ...loanPaymentData, amount: e.target.value })}
+              placeholder="0.00"
+              className="border-gray-300 focus:border-[#0099b5]"
+            />
+          )}
+      </div>
+      <div>
+        <Label htmlFor="paymentNote">{t("loan.paymentNote")}</Label>
+        <Textarea
+          id="paymentNote"
+          value={loanPaymentData.note}
+          onChange={(e) => setLoanPaymentData({ ...loanPaymentData, note: e.target.value })}
+          placeholder="Qo'shimcha izoh"
+          rows={3}
+        />
+      </div>
+    </div>
 
-            <div>
-              <Label htmlFor="paymentAmount">{t("loan.paymentAmount")} *</Label>
-              <Input
-  id="paymentAmount"
-  type="number"
-  min="0"
-  max={selectedLoan?.amountRemaining || 0}
-  value={loanPaymentData.amount}
-  onChange={(e) => setLoanPaymentData({ ...loanPaymentData, amount: e.target.value })}
-  placeholder="0.00"
-  className={
-    Number(loanPaymentData.amount) > (selectedLoan?.amountRemaining || 0)
-      ? "border-red-500 focus:border-red-600 bg-red-50"
-      : "border-gray-300 focus:border-[#0099b5]"
-  }
-/>
-            </div>
-
-            <div>
-              <Label htmlFor="paymentNote">{t("loan.paymentNote")}</Label>
-              <Textarea
-                id="paymentNote"
-                value={loanPaymentData.note}
-                onChange={(e) => setLoanPaymentData({ ...loanPaymentData, note: e.target.value })}
-                placeholder="Qo'shimcha izoh"
-                rows={3}
-              />
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsLoanPaymentModalOpen(false)}>
-              {t("cancel")}
-            </Button>
-            <Button onClick={handleAddLoanPayment} disabled={isSubmitting}>
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Yuklanmoqda...
-                </>
-              ) : (
-                <>
-                  <CreditCard className="mr-2 h-4 w-4" />
-                  To'lov qo'shish
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+    <DialogFooter>
+      <Button variant="outline" onClick={() => setIsLoanPaymentModalOpen(false)}>
+        {t("cancel")}
+      </Button>
+      <Button onClick={handleAddLoanPayment} disabled={isSubmitting}>
+        {isSubmitting ? (
+          <>
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            Yuklanmoqda...
+          </>
+        ) : (
+          <>
+            <CreditCard className="mr-2 h-4 w-4" />
+            To'lov qo'shish
+          </>
+        )}
+      </Button>
+    </DialogFooter>
+  </DialogContent>
+</Dialog>
 
       <Dialog open={isLoanDetailsModalOpen} onOpenChange={setIsLoanDetailsModalOpen}>
         <DialogContent className="max-w-2xl">
@@ -4607,102 +5466,172 @@ const handleUpdateExchangeRate = () => {
             <DialogDescription>{selectedLoan?.customerName}</DialogDescription>
           </DialogHeader>
 
-          {selectedLoan && (
-            <div className="space-y-6">
-              {/* Customer Info */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Mijoz ma'lumotlari</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Ism:</span>
-                    <span className="font-medium">{selectedLoan.customerName}</span>
-                  </div>
-                  {selectedLoan.customerPhone && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Telefon:</span>
-                      <span className="font-medium">{selectedLoan.customerPhone}</span>
-                    </div>
-                  )}
-                  {selectedLoan.customerAddress && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Manzil:</span>
-                      <span className="font-medium">{selectedLoan.customerAddress}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Chek raqami:</span>
-                    <span className="font-medium">{selectedLoan.receiptNumber}</span>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Payment Info */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">To'lov ma'lumotlari</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">{t("loan.totalAmount")}:</span>
-                    <span className="font-semibold">${selectedLoan.totalAmount.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">{t("loan.amountPaid")}:</span>
-                    <span className="font-semibold text-green-600">
-                      ${(selectedLoan.amountPaid || 0).toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">{t("loan.amountRemaining")}:</span>
-                    <span className="font-semibold text-orange-600">
-                      ${(selectedLoan.amountRemaining || 0).toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">{t("loan.status")}:</span>
-                    <Badge
-                      variant={
-                        selectedLoan.status === "paid"
-                          ? "default"
-                          : selectedLoan.status === "partial"
-                            ? "secondary"
-                            : "destructive"
-                      }
-                    >
-                      {t(`loan.status.${selectedLoan.status}`)}
-                    </Badge>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Payment History */}
-              {selectedLoan.paymentHistory && selectedLoan.paymentHistory.length > 0 && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-base">{t("loan.paymentHistory")}</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3">
-                      {selectedLoan.paymentHistory.map((payment, index) => (
-                        <div key={index} className="flex justify-between items-start p-3 bg-muted rounded-lg">
-                          <div>
-                            <p className="font-semibold">${payment.amount.toLocaleString()}</p>
-                            <p className="text-sm text-muted-foreground">
-                              {payment.date?.toDate?.()?.toLocaleDateString("uz-UZ") || "N/A"}
-                            </p>
-                            {payment.note && <p className="text-sm text-muted-foreground mt-1">{payment.note}</p>}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-            </div>
+  {selectedLoan && (
+  <Card className="mb-4">
+    <CardHeader>
+      <CardTitle className="text-base font-bold text-blue-900">Qarz tafsilotlari</CardTitle>
+    </CardHeader>
+    <CardContent className="space-y-4">
+      {/* Mijoz ma'lumotlari */}
+      <div className="flex items-center gap-4">
+        <Users className="h-5 w-5 text-muted-foreground" />
+        <div>
+          <div className="font-semibold text-lg">{selectedLoan.customerName}</div>
+          {selectedLoan.customerPhone && (
+            <div className="text-sm text-muted-foreground">{selectedLoan.customerPhone}</div>
           )}
+        </div>
+      </div>
 
+      {/* Mahsulotlar */}
+      {selectedLoan.items && selectedLoan.items.length > 0 && (
+        <div className="mt-2 p-3 bg-gray-50 rounded-lg">
+          <div className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
+            <Package className="h-3 w-3" />
+            Mahsulotlar:
+          </div>
+          <div className="space-y-1.5">
+            {selectedLoan.items.map((item, idx) => {
+              const profitPercent = Number(item.profitPercent) || 0
+              const basePrice = Number(item.price)
+              const profitPrice = profitPercent > 0 ? basePrice + (basePrice * profitPercent) / 100 : basePrice
+              const totalProfitPrice = profitPrice * item.quantity
+              const profitOnly = profitPercent > 0 ? (basePrice * profitPercent / 100) * item.quantity : 0
+              return (
+                <div key={idx} className="flex items-center justify-between gap-2 text-sm">
+                  <div>
+                    <span className="font-medium text-gray-900">{item.productName}</span>
+                    <span className="text-xs text-gray-600 ml-2">
+                      Kod: {item.productCode} • {item.company}
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-xs text-gray-600">
+                      {item.quantity} x ${basePrice.toLocaleString()}
+                    </span>
+                    <span className="font-semibold text-sm ml-2">
+                      ${Number(item.quantity * basePrice).toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Statistika */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
+        <div>
+          <p className="text-xs text-muted-foreground">Umumiy summa</p>
+          <p className="font-semibold">${selectedLoan.totalAmount.toLocaleString()}</p>
+          <p className="text-xs text-muted-foreground">
+            {(selectedLoan.totalAmount * exchangeRate).toLocaleString()} so'm
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">To'langan summa</p>
+          <p className="font-semibold text-green-600">${(selectedLoan.amountPaid || 0).toLocaleString()}</p>
+          <p className="text-xs text-green-700">
+            {((selectedLoan.amountPaid || 0) * exchangeRate).toLocaleString()} so'm
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Qolgan qarz</p>
+          <p className="font-semibold text-orange-600">${(selectedLoan.amountRemaining || 0).toLocaleString()}</p>
+          <p className="text-xs text-orange-700">
+            {((selectedLoan.amountRemaining || 0) * exchangeRate).toLocaleString()} so'm
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Holati</p>
+          <Badge
+            variant={
+              selectedLoan.status === "paid"
+                ? "default"
+                : selectedLoan.status === "partial"
+                ? "secondary"
+                : "destructive"
+            }
+          >
+            {selectedLoan.status === "paid"
+              ? "To'langan"
+              : selectedLoan.status === "partial"
+              ? "Qisman to'langan"
+              : "To'lanmagan"}
+          </Badge>
+        </div>
+      </div>
+
+      {/* Umumiy foizli narx va foyda */}
+      {selectedLoan.items && selectedLoan.items.length > 0 && (
+        <div className="mt-4 p-3 bg-blue-50 rounded-lg space-y-2">
+          {(() => {
+            const totalProfitUSD = selectedLoan.items.reduce((sum, item) => {
+              const percent = Number(item.profitPercent) || 0
+              const price = Number(item.price)
+              const profitPrice = percent > 0 ? price + (price * percent) / 100 : price
+              return sum + profitPrice * item.quantity
+            }, 0)
+            const totalProfitUZS = totalProfitUSD * exchangeRate
+            const avgPercent = (() => {
+              const percents = selectedLoan.items
+                .filter((i: any) => Number(i.profitPercent) > 0)
+                .map((i: any) => Number(i.profitPercent))
+              return percents.length > 0
+                ? Math.round(percents.reduce((a, b) => a + b, 0) / percents.length)
+                : 0
+            })()
+            const profitOnly = selectedLoan.items.reduce((sum, item) => {
+              const p = Number(item.profitPercent) || 0
+              const base = Number(item.price)
+              return sum + (p > 0 ? (base * p / 100) * item.quantity : 0)
+            }, 0)
+            const profitOnlyUZS = profitOnly * exchangeRate
+            return (
+              <>
+                <div className="flex justify-between">
+                  <span className="font-semibold text-blue-700">Foizli narx:</span>
+                  <span className="font-bold text-blue-900">
+                    ${totalProfitUSD.toLocaleString()}
+                    {avgPercent > 0 && (
+                      <span className="text-xs text-blue-700 ml-1">({avgPercent}%)</span>
+                    )}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="font-semibold text-blue-700">So'mda:</span>
+                  <span className="font-bold text-blue-900">
+                    {totalProfitUZS.toLocaleString()} so'm
+                  </span>
+                </div>
+                <div className="flex justify-between mt-2">
+                  <span className="font-semibold text-green-700">Foyda (faqat foizdan):</span>
+                  <span className="font-bold text-green-700">
+                    ${profitOnly.toLocaleString()}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="font-semibold text-green-700">So'mda:</span>
+                  <span className="font-bold text-green-700">
+                    {profitOnlyUZS.toLocaleString()} so'm
+                  </span>
+                </div>
+              </>
+            )
+          })()}
+        </div>
+      )}
+
+      {/* Eslatma */}
+      {selectedLoan.notes && (
+        <p className="text-sm text-muted-foreground mt-2">
+          <span className="font-medium">Eslatma:</span> {selectedLoan.notes}
+        </p>
+      )}
+    </CardContent>
+  </Card>
+)}
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsLoanDetailsModalOpen(false)}>
               Yopish
@@ -4711,158 +5640,104 @@ const handleUpdateExchangeRate = () => {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showReceipt} onOpenChange={setShowReceipt}>
-        <DialogContent className="max-w-[400px] p-0">
-          <DialogHeader className="sr-only">
-            <DialogTitle>Chek</DialogTitle>
-          </DialogHeader>
-          {receiptData && (
-            <div
-              className="receipt-container bg-white p-6 text-black"
-              style={{ fontFamily: "monospace", fontSize: "14px" }}
-            >
-              <div className="text-center mb-4">
-                <h2 className="text-2xl font-bold mb-2">SAVDO CHEKI</h2>
-                <div className="text-xs space-y-1">
-                  <p className="font-semibold">Chek №: {receiptData.receiptNumber}</p>
-                  <p>
-                    {receiptData.date instanceof Date
-                      ? receiptData.date.toLocaleString("uz-UZ", {
-                          day: "2-digit",
-                          month: "2-digit",
-                          year: "numeric",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })
-                      : receiptData.date}
-                  </p>
+
+{receiptData && (
+  <div className="receipt-print-only" style={{ display: "none" }}>
+    <div className="text-center mb-4">
+      <h2 className="text-2xl font-bold mb-2">SAVDO CHEKI</h2>
+      <div className="text-xs space-y-1">
+        <p className="font-semibold">Chek №: {receiptData.receiptNumber}</p>
+        <p>
+          {receiptData.date instanceof Date
+            ? receiptData.date.toLocaleString("uz-UZ", {
+                day: "2-digit",
+                month: "2-digit",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })
+            : receiptData.date}
+        </p>
+      </div>
+    </div>
+    <div className="border-t-2 border-dashed border-gray-800 my-3"></div>
+    <div className="space-y-4 text-sm">
+      {receiptData.items.map((item: any, index: number) => {
+        const profitPercent = Number(item.profitPercent) || 0
+        const basePrice = Number(item.price)
+        const profitPrice = profitPercent > 0
+          ? basePrice + (basePrice * profitPercent / 100)
+          : basePrice
+        const totalProfitPrice = profitPrice * item.quantity
+        return (
+          <div key={index} className="space-y-1">
+            <div className="font-bold text-base">{item.productName}</div>
+            <div className="text-xs space-y-0.5 text-gray-700">
+              <div className="flex justify-between">
+                <span>Kod:</span>
+                <span className="font-semibold">{item.productCode}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Model:</span>
+                <span className="font-semibold">{item.model || "N/A"}</span>
+              </div>
+              {item.location && (
+                <div className="flex justify-between">
+                  <span>Joylashuv:</span>
+                  <span className="font-semibold">{item.location}</span>
                 </div>
-              </div>
-
-              <div className="border-t-2 border-dashed border-gray-800 my-3"></div>
-
-              {/* GMs List */}
-              <div className="space-y-4 text-sm">
-                {receiptData.items.map((item: any, index: number) => (
-                  <div key={index} className="space-y-1">
-                    <div className="font-bold text-base">{item.GMName}</div>
-                    <div className="text-xs space-y-0.5 text-gray-700">
-                      <div className="flex justify-between">
-                        <span>Kod:</span>
-                        <span className="font-semibold">{item.GMCode}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Model:</span>
-                        <span className="font-semibold">{item.model || "N/A"}</span>
-                      </div>
-                      {item.location && (
-                        <div className="flex justify-between">
-                          <span>Joylashuv:</span>
-                          <span className="font-semibold">{item.location}</span>
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex justify-between mt-2 text-sm">
-                      <span>
-                        {item.quantity} dona x ${item.price.toFixed(2)}
-                      </span>
-                      <span className="font-bold">${(item.quantity * item.price).toFixed(2)}</span>
-                    </div>
-                    {index < receiptData.items.length - 1 && (
-                      <div className="border-t border-dotted border-gray-400 mt-3"></div>
-                    )}
-                  </div>
-                ))}
-              </div>
-
-              <div className="border-t-2 border-dashed border-gray-800 my-4"></div>
-
-              {/* Total */}
-              <div className="flex justify-between text-xl font-bold mb-4">
-                <span>JAMI:</span>
-                <span>${receiptData.totalAmount.toLocaleString()}</span>
-              </div>
-
-              <div className="border-t-2 border-dashed border-gray-800 my-3"></div>
+              )}
             </div>
-          )}
-          <DialogFooter className="p-4 pt-0">
-            <Button variant="outline" onClick={() => setShowReceipt(false)} className="flex-1">
-              Yopish
-            </Button>
-            <Button onClick={printReceipt} className="bg-[#0099b5] hover:bg-[#0099b5]/90 flex-1">
-              <Printer className="h-4 w-4 mr-2" />
-              Chop etish
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {receiptData && (
-        <div className="receipt-print-only">
-          <div className="text-center mb-4">
-            <h2 className="text-2xl font-bold mb-2">SAVDO CHEKI</h2>
-            <div className="text-xs space-y-1">
-              <p className="font-semibold">Chek №: {receiptData.receiptNumber}</p>
-              <p>
-                {receiptData.date instanceof Date
-                  ? receiptData.date.toLocaleString("uz-UZ", {
-                      day: "2-digit",
-                      month: "2-digit",
-                      year: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })
-                  : receiptData.date}
-              </p>
+            <div className="flex justify-between mt-2 text-sm">
+              <span>
+                {item.quantity} dona x ${profitPrice.toLocaleString()}
+              </span>
+              <span className="font-bold">${totalProfitPrice.toLocaleString()}</span>
             </div>
+            <div className="flex justify-between mt-1 text-sm">
+              <span></span>
+              <span className="font-bold">{(totalProfitPrice * exchangeRate).toLocaleString()} so'm</span>
+            </div>
+            {index < receiptData.items.length - 1 && (
+              <div className="border-t border-dotted border-gray-400 mt-3"></div>
+            )}
           </div>
-
-          <div className="border-t-2 border-dashed border-gray-800 my-3"></div>
-
-          <div className="space-y-4 text-sm">
-            {receiptData.items.map((item: any, index: number) => (
-              <div key={index} className="space-y-1">
-                <div className="font-bold text-base">{item.GMName}</div>
-                <div className="text-xs space-y-0.5 text-gray-700">
-                  <div className="flex justify-between">
-                    <span>Kod:</span>
-                    <span className="font-semibold">{item.GMCode}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Model:</span>
-                    <span className="font-semibold">{item.model || "N/A"}</span>
-                  </div>
-                  {item.location && (
-                    <div className="flex justify-between">
-                      <span>Joylashuv:</span>
-                      <span className="font-semibold">{item.location}</span>
-                    </div>
-                  )}
-                </div>
-                <div className="flex justify-between mt-2 text-sm">
-                  <span>
-                    {item.quantity} dona x ${item.price.toFixed(2)}
-                  </span>
-                  <span className="font-bold">${(item.quantity * item.price).toFixed(2)}</span>
-                </div>
-                {index < receiptData.items.length - 1 && (
-                  <div className="border-t border-dotted border-gray-400 mt-3"></div>
-                )}
-              </div>
-            ))}
-          </div>
-
-          <div className="border-t-2 border-dashed border-gray-800 my-4"></div>
-
-          <div className="flex justify-between text-xl font-bold mb-4">
-            <span>JAMI:</span>
-            <span>${receiptData.totalAmount.toLocaleString()}</span>
-          </div>
-
-          <div className="border-t-2 border-dashed border-gray-800 my-3"></div>
-        </div>
-      )}
+        )
+      })}
+    </div>
+    <div className="border-t-2 border-dashed border-gray-800 my-3"></div>
+    <div className="flex justify-between text-xl font-bold mb-2">
+      <span>JAMI:</span>
+      <span>
+        ${receiptData.items
+          .reduce((sum: number, item: any) => {
+            const profitPercent = Number(item.profitPercent) || 0
+            const basePrice = Number(item.price)
+            const profitPrice = profitPercent > 0
+              ? basePrice + (basePrice * profitPercent / 100)
+              : basePrice
+            return sum + profitPrice * item.quantity
+          }, 0)
+          .toLocaleString()}
+      </span>
+    </div>
+    <div className="flex justify-between text-xl font-bold mb-2">
+      <span>JAMI:</span>
+      <span>
+        {(
+          receiptData.items.reduce((sum: number, item: any) => {
+            const profitPercent = Number(item.profitPercent) || 0
+            const basePrice = Number(item.price)
+            const profitPrice = profitPercent > 0
+              ? basePrice + (basePrice * profitPercent / 100)
+              : basePrice
+            return sum + profitPrice * item.quantity
+          }, 0) * exchangeRate
+        ).toLocaleString()} so'm
+      </span>
+    </div>
+  </div>
+)}
     </div>
   )
 }

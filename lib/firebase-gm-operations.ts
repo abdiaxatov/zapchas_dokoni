@@ -1,6 +1,7 @@
 import { collection, addDoc, updateDoc, doc, getDocs, query, orderBy, Timestamp } from "firebase/firestore"
 import { db } from "./firebase"
 import staticGMsData from "@/data/gm-data.json"
+
 export interface GM {
   id?: string
   kodi: string
@@ -16,6 +17,7 @@ export interface GM {
   category?: string // GM category
   supplier?: string // Supplier information
   cost?: string // Cost price
+  source?: string // 🔹 Qayerdan olib kelindi
   profit?: number // Profit margin
   barcode?: string // Barcode
   weight?: number // Weight in kg
@@ -31,14 +33,16 @@ export interface GM {
   isStatic?: boolean // Flag to identify static data
   debtPrice?: string // Debt price if sold on credit
   debtQuantity?: number // Quantity sold on credit
+    profitPercent?: number // 🔹 Foiz ustama (masalan: 15)
+    
 }
 
 export interface SaleGM {
   id?: string
   items: Array<{
-    GMId: string
-    GMName: string
-    GMCode: string
+    productId: string
+    productName: string
+    productCode: string
     company: string
     quantity: number
     price: number
@@ -54,6 +58,7 @@ export interface SaleGM {
   loanStatus?: "pending" | "partial" | "paid" // Loan payment status
   amountPaid?: number // Amount paid so far
   amountRemaining?: number // Amount still owed
+  profitPercent?: number
 }
 
 export interface LoanRecord {
@@ -66,6 +71,8 @@ export interface LoanRecord {
   totalAmount: number
   amountPaid: number
   amountRemaining: number
+  profitPercent?: number
+  source?: string // Qayerdan olib kelindi
   loanDate: Timestamp
   dueDate?: Timestamp
   status: "pending" | "partial" | "paid"
@@ -98,29 +105,31 @@ const loadStaticGMs = async (): Promise<GM[]> => {
     const staticData = staticGMsData
 
     // Transform static data to match GM interface
-    return staticData.map((item: any, index: number) => ({
-      id: item.id || `static-${index + 1}`, // Use existing ID or generate one
-      kodi: item.kodi || item.KODI,
-      model: item.model || item.MODEL || "",
-      nomi: item.nomi || item.NOMI,
-      kompaniya: item.kompaniya || item.KOMPANIYA,
-      narxi: typeof item.narxi === "number" ? item.narxi.toString() : item.narxi || item.NARXI,
-      sold: item.sold || 0,
-      stock: item.stock || 0,
-      minStock: item.minStock || 10,
-      maxStock: item.maxStock || 1000,
-      location: item.location,
-      category: item.category,
-      supplier: item.supplier,
-      cost: item.cost,
-      barcode: item.barcode,
-      weight: item.weight,
-      dimensions: item.dimensions,
-      description: item.description,
-      status: item.status || "active",
-      paymentType: item.paymentType || "naqd", // Default payment type is cash
-      isStatic: true,
-    }))
+   return staticData.map((item: any, index: number) => ({
+  id: item.id || `static-${index + 1}`, // Use existing ID or generate one
+  kodi: item.kodi || item.KODI,
+  model: item.model || item.MODEL || "",
+  nomi: item.nomi || item.NOMI,
+  kompaniya: item.kompaniya || item.KOMPANIYA,
+  narxi: typeof item.narxi === "number" ? item.narxi.toString() : item.narxi || item.NARXI,
+  sold: item.sold || 0,
+  stock: item.stock || 0,
+  minStock: item.minStock || 10,
+  maxStock: item.maxStock || 1000,
+  location: item.location,
+  category: item.category,
+  supplier: item.supplier,
+  cost: item.cost,
+  barcode: item.barcode,
+  weight: item.weight,
+  profitPercent: item.profitPercent,
+  dimensions: item.dimensions,
+  description: item.description,
+  status: item.status || "active",
+  paymentType: item.paymentType || "naqd", // Default payment type is cash
+  source: item.source || "", // 🔹 Qayerdan olib kelindi maydoni qo‘shildi
+  isStatic: true,
+}))
   } catch (error) {
     console.error("Error loading static GMs:", error)
     return []
@@ -154,11 +163,11 @@ export const getGMs = async (): Promise<GM[]> => {
           // Mark this static ID as deleted
           deletedStaticIds.add(p.id || "")
         } else {
-          // This is a modified static GM, use Firebase version
+          // This is a modified static product, use Firebase version
           firebaseMap.set(p.id || "", p)
         }
       } else if (!p.isDeleted) {
-        // Regular Firebase GM (not deleted)
+        // Regular Firebase product (not deleted)
         firebaseMap.set(p.id || "", p)
       }
     })
@@ -176,17 +185,19 @@ export const getGMs = async (): Promise<GM[]> => {
   }
 }
 
-// Add new GM
-export const addGM = async (GM: Omit<GM, "id" | "createdAt" | "updatedAt">): Promise<string> => {
+// Add new product
+export const addGM = async (product: Omit<GM, "id" | "createdAt" | "updatedAt">): Promise<string> => {
   try {
     const cleanedGM = removeUndefinedFields({
-      ...GM,
-      sold: GM.sold || 0,
-      stock: GM.stock || 0,
-      minStock: GM.minStock || 10,
-      maxStock: GM.maxStock || 1000,
-      status: GM.status || "active",
-      paymentType: GM.paymentType || "naqd", // Default payment type is cash
+      ...product,
+      sold: product.sold || 0,
+      stock: product.stock || 0,
+      profitPercent: product.profitPercent || 0,
+      source: product.source || "", // source maydoni ham kiritiladi
+      minStock: product.minStock || 10,
+      maxStock: product.maxStock || 1000,
+      status: product.status || "active",
+      paymentType: product.paymentType || "naqd", // Default payment type is cash
       isDeleted: false,
       isStatic: false,
       createdAt: Timestamp.now(),
@@ -196,7 +207,7 @@ export const addGM = async (GM: Omit<GM, "id" | "createdAt" | "updatedAt">): Pro
     const docRef = await addDoc(collection(db, COLLECTION_NAME), cleanedGM)
     return docRef.id
   } catch (error) {
-    console.error("Error adding GM:", error)
+    console.error("Error adding product:", error)
     throw error
   }
 }
@@ -204,9 +215,9 @@ export const addGM = async (GM: Omit<GM, "id" | "createdAt" | "updatedAt">): Pro
 export const updateGM = async (id: string, updates: Partial<GM>): Promise<void> => {
   try {
     const GMs = await getGMs()
-    const GM = GMs.find((p) => p.id === id)
+    const product = GMs.find((p) => p.id === id)
 
-    if (GM?.isStatic) {
+    if (product?.isStatic) {
       const q = query(collection(db, COLLECTION_NAME))
       const querySnapshot = await getDocs(q)
       const existingFirebaseGM = querySnapshot.docs.find(
@@ -222,10 +233,12 @@ export const updateGM = async (id: string, updates: Partial<GM>): Promise<void> 
         await updateDoc(docRef, cleanedUpdates)
       } else {
         const cleanedGM = removeUndefinedFields({
-          ...GM,
+          ...product,
           ...updates,
           id: id,
           isStatic: true,
+          profitPercent: updates.profitPercent || product.profitPercent || 0,
+           source: product.source || "", // source maydoni ham kiritiladi
           isDeleted: false,
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now(),
@@ -241,7 +254,7 @@ export const updateGM = async (id: string, updates: Partial<GM>): Promise<void> 
       await updateDoc(docRef, cleanedUpdates)
     }
   } catch (error) {
-    console.error("Error updating GM:", error)
+    console.error("Error updating product:", error)
     throw error
   }
 }
@@ -249,9 +262,9 @@ export const updateGM = async (id: string, updates: Partial<GM>): Promise<void> 
 export const deleteGM = async (id: string): Promise<void> => {
   try {
     const GMs = await getGMs()
-    const GM = GMs.find((p) => p.id === id)
+    const product = GMs.find((p) => p.id === id)
 
-    if (GM?.isStatic) {
+    if (product?.isStatic) {
       const q = query(collection(db, COLLECTION_NAME))
       const querySnapshot = await getDocs(q)
       const existingFirebaseGM = querySnapshot.docs.find((doc) => doc.data().id === id && doc.data().isStatic)
@@ -282,7 +295,7 @@ export const deleteGM = async (id: string): Promise<void> => {
       })
     }
   } catch (error) {
-    console.error("Error deleting GM:", error)
+    console.error("Error deleting product:", error)
     throw error
   }
 }
@@ -290,9 +303,9 @@ export const deleteGM = async (id: string): Promise<void> => {
 export const sellGM = async (id: string, quantity: number): Promise<void> => {
   try {
     const GMs = await getGMs()
-    const GM = GMs.find((p) => p.id === id)
-    if (GM) {
-      if (GM.isStatic) {
+    const product = GMs.find((p) => p.id === id)
+    if (product) {
+      if (product.isStatic) {
         const q = query(collection(db, COLLECTION_NAME))
         const querySnapshot = await getDocs(q)
         const existingFirebaseGM = querySnapshot.docs.find((doc) => doc.data().id === id && doc.data().isStatic)
@@ -309,10 +322,10 @@ export const sellGM = async (id: string, quantity: number): Promise<void> => {
           })
         } else {
           const cleanedGM = removeUndefinedFields({
-            ...GM,
+            ...product,
             id: id,
             sold: quantity,
-            stock: Math.max(0, (GM.stock || 0) - quantity),
+            stock: Math.max(0, (product.stock || 0) - quantity),
             isStatic: true,
             isDeleted: false,
             lastSold: Timestamp.now(),
@@ -323,9 +336,9 @@ export const sellGM = async (id: string, quantity: number): Promise<void> => {
         }
       } else {
         const docRef = doc(db, COLLECTION_NAME, id)
-        const newStock = Math.max(0, (GM.stock || 0) - quantity)
+        const newStock = Math.max(0, (product.stock || 0) - quantity)
         await updateDoc(docRef, {
-          sold: (GM.sold || 0) + quantity,
+          sold: (product.sold || 0) + quantity,
           stock: newStock,
           lastSold: Timestamp.now(),
           updatedAt: Timestamp.now(),
@@ -333,7 +346,7 @@ export const sellGM = async (id: string, quantity: number): Promise<void> => {
       }
     }
   } catch (error) {
-    console.error("Error selling GM:", error)
+    console.error("Error selling product:", error)
     throw error
   }
 }
@@ -341,9 +354,9 @@ export const sellGM = async (id: string, quantity: number): Promise<void> => {
 export const addStock = async (id: string, quantity: number): Promise<void> => {
   try {
     const GMs = await getGMs()
-    const GM = GMs.find((p) => p.id === id)
-    if (GM) {
-      if (GM.isStatic) {
+    const product = GMs.find((p) => p.id === id)
+    if (product) {
+      if (product.isStatic) {
         const q = query(collection(db, COLLECTION_NAME))
         const querySnapshot = await getDocs(q)
         const existingFirebaseGM = querySnapshot.docs.find((doc) => doc.data().id === id && doc.data().isStatic)
@@ -358,9 +371,9 @@ export const addStock = async (id: string, quantity: number): Promise<void> => {
           })
         } else {
           const cleanedGM = removeUndefinedFields({
-            ...GM,
+            ...product,
             id: id,
-            stock: (GM.stock || 0) + quantity,
+            stock: (product.stock || 0) + quantity,
             isStatic: true,
             isDeleted: false,
             lastRestocked: Timestamp.now(),
@@ -372,7 +385,7 @@ export const addStock = async (id: string, quantity: number): Promise<void> => {
       } else {
         const docRef = doc(db, COLLECTION_NAME, id)
         await updateDoc(docRef, {
-          stock: (GM.stock || 0) + quantity,
+          stock: (product.stock || 0) + quantity,
           lastRestocked: Timestamp.now(),
           updatedAt: Timestamp.now(),
         })
@@ -387,11 +400,11 @@ export const addStock = async (id: string, quantity: number): Promise<void> => {
 export const removeStock = async (id: string, quantity: number): Promise<void> => {
   try {
     const GMs = await getGMs()
-    const GM = GMs.find((p) => p.id === id)
-    if (GM) {
-      const newStock = Math.max(0, (GM.stock || 0) - quantity)
+    const product = GMs.find((p) => p.id === id)
+    if (product) {
+      const newStock = Math.max(0, (product.stock || 0) - quantity)
 
-      if (GM.isStatic) {
+      if (product.isStatic) {
         const q = query(collection(db, COLLECTION_NAME))
         const querySnapshot = await getDocs(q)
         const existingFirebaseGM = querySnapshot.docs.find((doc) => doc.data().id === id && doc.data().isStatic)
@@ -404,7 +417,7 @@ export const removeStock = async (id: string, quantity: number): Promise<void> =
           })
         } else {
           const cleanedGM = removeUndefinedFields({
-            ...GM,
+            ...product,
             id: id,
             stock: newStock,
             isStatic: true,
@@ -432,9 +445,9 @@ export const bulkUpdateStock = async (updates: { id: string; stock: number }[]):
   try {
     const GMs = await getGMs()
     const updatePromises = updates.map(async ({ id, stock }) => {
-      const GM = GMs.find((p) => p.id === id)
+      const product = GMs.find((p) => p.id === id)
 
-      if (GM?.isStatic) {
+      if (product?.isStatic) {
         const q = query(collection(db, COLLECTION_NAME))
         const querySnapshot = await getDocs(q)
         const existingFirebaseGM = querySnapshot.docs.find((doc) => doc.data().id === id && doc.data().isStatic)
@@ -447,7 +460,7 @@ export const bulkUpdateStock = async (updates: { id: string; stock: number }[]):
           })
         } else {
           const cleanedGM = removeUndefinedFields({
-            ...GM,
+            ...product,
             id: id,
             stock,
             isStatic: true,
@@ -475,7 +488,7 @@ export const bulkUpdateStock = async (updates: { id: string; stock: number }[]):
 export const getLowStockGMs = async (): Promise<GM[]> => {
   try {
     const GMs = await getGMs()
-    return GMs.filter((GM) => (GM.stock || 0) <= (GM.minStock || 10))
+    return GMs.filter((product) => (product.stock || 0) <= (product.minStock || 10))
   } catch (error) {
     console.error("Error getting low stock GMs:", error)
     throw error
@@ -485,7 +498,7 @@ export const getLowStockGMs = async (): Promise<GM[]> => {
 export const getGMsByCategory = async (category: string): Promise<GM[]> => {
   try {
     const GMs = await getGMs()
-    return GMs.filter((GM) => GM.category === category)
+    return GMs.filter((product) => product.category === category)
   } catch (error) {
     console.error("Error getting GMs by category:", error)
     throw error
@@ -495,9 +508,10 @@ export const getGMsByCategory = async (category: string): Promise<GM[]> => {
 export const getInventoryValue = async (): Promise<number> => {
   try {
     const GMs = await getGMs()
-    return GMs.reduce((total, GM) => {
-      const price = Number.parseFloat(GM.narxi.replace(/[^\d.]/g, "")) || 0
-      const stock = GM.stock || 0
+    return GMs.reduce((total, product) => {
+      const price = Number.parseFloat(product.narxi.replace(/[^\d.]/g, "")) || 0
+      const stock = product.stock || 0
+      
       return total + price * stock
     }, 0)
   } catch (error) {
@@ -523,9 +537,9 @@ export const deleteAllGMs = async (): Promise<void> => {
 
     // Also mark all static GMs as deleted
     const staticGMs = await loadStaticGMs()
-    const staticDeletePromises = staticGMs.map((GM) => {
+    const staticDeletePromises = staticGMs.map((product) => {
       return addDoc(collection(db, COLLECTION_NAME), {
-        id: GM.id,
+        id: product.id,
         isDeleted: true,
         isStatic: true,
         deletedAt: Timestamp.now(),
@@ -570,7 +584,7 @@ export const getSaleGMs = async (): Promise<SaleGM[]> => {
         }) as SaleGM,
     )
   } catch (error) {
-    console.error("Error getting sale GMs:", error)
+    console.error("Error getting sale transactions:", error)
     throw error
   }
 }
@@ -647,6 +661,7 @@ export const addLoanPayment = async (loanId: string, amount: number, note?: stri
       amountPaid: newAmountPaid,
       amountRemaining: Math.max(0, newAmountRemaining),
       status: newStatus,
+      profitPercent: loan.profitPercent || 0,
       paymentHistory: updatedPaymentHistory,
     })
 
@@ -657,6 +672,7 @@ export const addLoanPayment = async (loanId: string, amount: number, note?: stri
         loanStatus: newStatus,
         amountPaid: newAmountPaid,
         amountRemaining: Math.max(0, newAmountRemaining),
+        profitPercent: loan.profitPercent || 0,
       })
     }
   } catch (error) {
